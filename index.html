@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <!-- file: documents don't match CSP 'self', hence the explicit file: sources -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: https: localart:; media-src 'self' blob: https: http://127.0.0.1:* file:; connect-src 'self' https: http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; font-src 'self' data: file:; object-src 'none'; base-uri 'self'"
+    />
+    <title>ByTune</title>
+    <script type="module" src="/src/main.tsx"></script>
+  </head>
+  <body style="background:#0a0a0a">
+    <div id="root"></div>
+  </body>
+</html>

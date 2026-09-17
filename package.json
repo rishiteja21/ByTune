@@ -1,0 +1,84 @@
+{
+  "name": "bytune-desktop",
+  "productName": "ByTune",
+  "private": true,
+  "version": "1.0.0",
+  "author": "ByTune",
+  "description": "ByTune",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -s first \"npm:dev:renderer\" \"npm:dev:app\"",
+    "dev:renderer": "vite",
+    "dev:app": "wait-on tcp:127.0.0.1:5173 && npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --external:electron --external:jsdom --external:undici --outdir=dist-electron && esbuild electron/po-page.ts --bundle --format=iife --outfile=dist-electron/po-page.js && node -e \"require('fs').copyFileSync('electron/po.html','dist-electron/po.html')\"",
+    "typecheck": "tsc --noEmit",
+    "test": "esbuild src/lib/account-validators.ts --bundle --format=esm --outfile=.test-build/account-validators.mjs && esbuild electron/sync-merge.ts --bundle --format=esm --outfile=.test-build/sync-merge.mjs && esbuild electron/audio-format.ts --bundle --format=esm --outfile=.test-build/audio-format.mjs && esbuild electron/backup-transfer.ts --bundle --format=esm --outfile=.test-build/backup-transfer.mjs && esbuild electron/local-paths.ts --bundle --format=esm --outfile=.test-build/local-paths.mjs && esbuild src/lib/deletion-sync.ts --bundle --format=esm --outfile=.test-build/deletion-sync.mjs && node --test tests/*.test.mjs",
+    "build": "npm run typecheck && npm run build:electron && vite build",
+    "start": "electron .",
+    "smoke": "node scripts/smoke.mjs",
+    "dist": "npm run build && electron-builder --win nsis",
+    "icon": "node scripts/gen-icon.mjs",
+    "qa:local": "node scripts/local-lib-qa.mjs"
+  },
+  "build": {
+    "appId": "com.bytune.music",
+    "productName": "ByTune",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "protocols": [
+      {
+        "name": "ByTune",
+        "schemes": [
+          "bytune"
+        ]
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "ByTune-Setup-${version}.${ext}",
+      "shortcutName": "ByTune"
+    }
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^44.3.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "lucide-react": "^0.468.0",
+    "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "wait-on": "^8.0.1",
+    "youtubei.js": "^18.0.0",
+    "zustand": "^5.0.2"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "bgutils-js": "^4.0.3",
+    "jsdom": "^29.1.1",
+    "music-metadata": "^11.15.0"
+  }
+}
