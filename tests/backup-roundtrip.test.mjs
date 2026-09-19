@@ -6,6 +6,7 @@ import {
   searchesToBackup,
   settingsFromBackup,
   settingsToBackup,
+  storeEnvelopeFromBackup,
 } from "../.test-build/backup-transfer.mjs";
 
 // The exact bug being guarded against: stores persist as zustand envelopes
@@ -100,4 +101,20 @@ test("malformed payloads degrade to empty, never throw", () => {
   assert.deepEqual(searchesFromBackup(42), []);
   assert.deepEqual(searchesFromBackup({ searches: [1, "ok", null] }), ["ok"]);
   assert.deepEqual(settingsFromBackup(null, null), {});
+});
+
+test("whole-store sections must be real envelopes, else import is refused", () => {
+  // A live export: persist always writes { state, version } envelopes.
+  const lib = envelope({ liked: [], playlists: [], history: [], downloads: {} });
+  lib.version = 1;
+  assert.deepEqual(storeEnvelopeFromBackup(lib, "library"), { state: lib.state, version: 1 });
+  // version 0 (stores without an explicit version) is a number too.
+  assert.deepEqual(storeEnvelopeFromBackup({ state: {}, version: 0 }, "player"), { state: {}, version: 0 });
+
+  // Junk that used to be written verbatim and broke the store on reload.
+  for (const junk of [null, undefined, 42, "nope", [], [1], { version: 1 }, { state: null, version: 1 },
+    { state: [], version: 1 }, { state: {}, version: "one" }]) {
+    assert.throws(() => storeEnvelopeFromBackup(junk, "library"), /malformed library section/);
+  }
+  assert.throws(() => storeEnvelopeFromBackup({ state: {} }, "player"), /malformed player section/);
 });

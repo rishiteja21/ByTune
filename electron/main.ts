@@ -37,6 +37,13 @@ process.on("unhandledRejection", (reason) => {
 let mainWindow: BrowserWindow | null = null;
 /** before-quit can fire twice (window close → quit); the drain must run once. */
 let drainStarted = false;
+/**
+ * Set for the whole app:resetData span. The renderer keeps playing until its
+ * reload lands, so listening events arriving in that window belong to the
+ * pre-reset session — recording them would re-arm stats flushes that
+ * re-create the buckets the reset just deleted (and quit would persist them).
+ */
+let dataResetActive = false;
 
 function iconPath(): string | undefined {
   const p = path.join(app.getAppPath(), "build", "icon.png");
@@ -119,7 +126,9 @@ function createWindow(): void {
     } catch { /* malformed URL */ }
     return { action: "deny" };
   });
-  void mainWindow.loadURL(pip.rendererUrl());
+  void mainWindow.loadURL(pip.rendererUrl()).catch((err) => {
+    console.warn("[bytune] main window load failed:", err instanceof Error ? err.message : err);
+  });
 
   mainWindow.webContents.on("before-input-event", (event, input) => {
     // DevTools are a development convenience, not a shipping feature.
@@ -268,6 +277,7 @@ function registerIpc(): void {
   ipc.on(
     "playback:event",
     (_e, ev: { type: string; track?: Track; positionSec?: number; playedSec?: number; deltaMs?: number }) => {
+      if (dataResetActive) return;
       // A new listen re-arms the one-play rule (replays count, loops don't).
       if (ev.type === "start" && ev.track?.id) stats.noteTrackStart(ev.track.id);
       if ((ev.type === "progress" || ev.type === "stop" || ev.type === "pause") && ev.track && (ev.deltaMs ?? 0) > 0) {
@@ -323,20 +333,25 @@ function registerIpc(): void {
     if (await transition.writeForDocument(name, data, scope)) sync.noteLocalWrite(String(name ?? ""));
   }));
   ipc.handle("app:resetData", () => transition.serializeData(async () => {
-    guestUpgradeIntent = false;
-    transition.invalidateResetDocuments();
-    sync.resetSyncState();
-    await auth.signOut();
-    stats.resetStats();
-    await Promise.all([downloads.resetDownloads(), locallib.resetLocalLibrary()]);
-    await persist.resetAppData();
-    // Approvals live in memory too — drop them and re-approve the default
-    // download location, or post-reset downloads would be rejected.
-    approvedDirs.clear();
+    dataResetActive = true;
     try {
-      approveDir(await downloads.defaultDownloadDir());
-    } catch {
-      /* approved lazily on next download */
+      guestUpgradeIntent = false;
+      transition.invalidateResetDocuments();
+      sync.resetSyncState();
+      await auth.signOut();
+      stats.resetStats();
+      await Promise.all([downloads.resetDownloads(), locallib.resetLocalLibrary()]);
+      await persist.resetAppData();
+      // Approvals live in memory too — drop them and re-approve the default
+      // download location, or post-reset downloads would be rejected.
+      approvedDirs.clear();
+      try {
+        approveDir(await downloads.defaultDownloadDir());
+      } catch {
+        /* approved lazily on next download */
+      }
+    } finally {
+      dataResetActive = false;
     }
   }));
 

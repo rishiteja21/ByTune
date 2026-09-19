@@ -168,11 +168,18 @@ function visibleRect(r: PipRect): PipRect {
 }
 
 function loadInto(win: BrowserWindow): void {
+  const fail = (err: unknown): void => {
+    console.warn("[bytune] miniplayer failed to load:", err instanceof Error ? err.message : err);
+    // A blank always-on-top window is worse than none; only close it if it is
+    // still the current PiP (a rapid open/close race must not close the
+    // replacement window).
+    if (pipWindow === win) closePip();
+  };
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     const base = process.env.VITE_DEV_SERVER_URL;
-    void win.loadURL(`${base.endsWith("/") ? base : `${base}/`}?window=pip`);
+    win.loadURL(`${base.endsWith("/") ? base : `${base}/`}?window=pip`).catch(fail);
   } else {
-    void win.loadFile(path.join(__dirname, "../dist/index.html"), { query: { window: "pip" } });
+    win.loadFile(path.join(__dirname, "../dist/index.html"), { query: { window: "pip" } }).catch(fail);
   }
 }
 
@@ -265,6 +272,12 @@ export function openPip(): void {
     notifyMain("pip:open-changed", true);
     // Ask the main window for a fresh playback snapshot right away.
     notifyMain("pip:need-state");
+    // The PiP registers its snapshot listener in a post-paint effect; a
+    // snapshot pushed before that is dropped, and while paused nothing else
+    // would ever refresh the window. One bounded re-request covers the race.
+    setTimeout(() => {
+      if (pipWindow && !pipWindow.isDestroyed()) notifyMain("pip:need-state");
+    }, 500);
   });
 
   pipWindow.on("moved", scheduleRectSave);

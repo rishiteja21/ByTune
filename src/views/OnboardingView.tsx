@@ -163,17 +163,22 @@ function UsernamePasswordForm({
     }
     if (debounce.current) clearTimeout(debounce.current);
     setUsernameState("checking");
+    // Clearing the timer doesn't cancel a request already in flight — a slow
+    // answer for an earlier name must not overwrite the current one's verdict
+    // (a stale "taken" blocked submit outright).
+    let stale = false;
     debounce.current = setTimeout(async () => {
       try {
         const res = (await window.bytune?.authUsernameAvailable(username.trim())) as
           | { available: boolean | null; reason?: string }
           | undefined;
-        setUsernameState(availabilityState(res?.available));
+        if (!stale) setUsernameState(availabilityState(res?.available));
       } catch {
-        setUsernameState("idle");
+        if (!stale) setUsernameState("idle");
       }
     }, 450);
     return () => {
+      stale = true;
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [username, mode, formatProblem]);
@@ -538,17 +543,20 @@ function PickUsernameScreen() {
     }
     if (debounce.current) clearTimeout(debounce.current);
     setState("checking");
+    // A slow verdict for an earlier name must not overwrite the current one's.
+    let stale = false;
     debounce.current = setTimeout(async () => {
       try {
         const res = (await window.bytune?.authUsernameAvailable(username.trim())) as
           | { available: boolean | null }
           | undefined;
-        setState(availabilityState(res?.available));
+        if (!stale) setState(availabilityState(res?.available));
       } catch {
-        setState("idle");
+        if (!stale) setState("idle");
       }
     }, 450);
     return () => {
+      stale = true;
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [username, formatProblem]);

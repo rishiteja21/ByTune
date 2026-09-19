@@ -398,7 +398,14 @@ function CloudAccountGroup() {
             onClick={async () => {
               // Guests upgrade by re-running onboarding; their local data
               // stays and merges into the account on the first sync.
-              if (session.mode === "guest") await window.bytune?.authClearGuestProfile();
+              if (session.mode === "guest") {
+                try {
+                  await window.bytune?.authClearGuestProfile();
+                } catch {
+                  useUI.getState().toast("Couldn't open onboarding — try again", "error");
+                  return;
+                }
+              }
               void useSession.getState().refresh();
             }}
             className="h-9 px-3.5 rounded-lg bg-accent text-[13px] font-semibold text-on-primary hover:brightness-110"
@@ -809,13 +816,23 @@ export function SettingsView() {
           onClose={() => setGuestDeleteOpen(false)}
           onSignIn={async () => {
             setGuestDeleteOpen(false);
-            await window.bytune?.authClearGuestProfile();
+            try {
+              await window.bytune?.authClearGuestProfile();
+            } catch {
+              useUI.getState().toast("Couldn't open onboarding — try again", "error");
+              return;
+            }
             setOnboardingIntent("signin");
             void useSession.getState().refresh();
           }}
           onCreateAccount={async () => {
             setGuestDeleteOpen(false);
-            await window.bytune?.authClearGuestProfile();
+            try {
+              await window.bytune?.authClearGuestProfile();
+            } catch {
+              useUI.getState().toast("Couldn't open onboarding — try again", "error");
+              return;
+            }
             setOnboardingIntent("signup");
             void useSession.getState().refresh();
           }}

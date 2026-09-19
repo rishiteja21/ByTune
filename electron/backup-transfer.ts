@@ -57,6 +57,22 @@ export function envelope(state: Record<string, unknown>): { state: Record<string
   return { state, version: 0 };
 }
 
+/**
+ * Backup document → persisted envelope for a whole store (library, player).
+ * These stores round-trip as envelopes, and writing anything else verbatim
+ * used to poison the store the renderer hydrates from (an array or a bare
+ * map without `state` breaks every subsequent write). Reject malformed
+ * sections with the same user-facing error the document checks use.
+ */
+export function storeEnvelopeFromBackup(raw: unknown, name: string): { state: Record<string, unknown>; version: number } {
+  const bad = (): Error => new Error(`That doesn't look like a ByTune backup (malformed ${name} section)`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw bad();
+  const env = raw as { state?: unknown; version?: unknown };
+  if (!env.state || typeof env.state !== "object" || Array.isArray(env.state)) throw bad();
+  if (typeof env.version !== "number" || !Number.isFinite(env.version)) throw bad();
+  return { state: env.state as Record<string, unknown>, version: env.version };
+}
+
 /** Store → backup document: whitelisted settings keys, device-local paths dropped. */
 export function settingsToBackup(envelopeOrState: unknown): Record<string, unknown> {
   const state = stateOf(envelopeOrState);

@@ -57,10 +57,10 @@ function execute(command: PipCommand): void {
       p.prev();
       break;
     case "seek":
-      if (typeof command.sec === "number") p.seek(command.sec);
+      if (typeof command.sec === "number" && Number.isFinite(command.sec)) p.seek(command.sec);
       break;
     case "volume":
-      if (typeof command.v === "number") p.setVolume(command.v);
+      if (typeof command.v === "number" && Number.isFinite(command.v)) p.setVolume(command.v);
       break;
     case "mute":
       p.toggleMute();
@@ -117,8 +117,13 @@ export function startPipSync(): () => void {
   const unsubPlayer = usePlayer.subscribe(() => push());
   const unsubLibrary = useLibrary.subscribe(() => push());
   // The PiP just (re)opened — resend a full snapshot so it never sits empty
-  // waiting for the next state change.
-  const offNeed = bridge.onPipNeedState?.(() => push(true)) ?? (() => {});
+  // waiting for the next state change. need-state only fires from a live PiP
+  // window, so it also repairs a stale isOpen reply that raced an
+  // open-changed event and would otherwise suppress every push.
+  const offNeed = bridge.onPipNeedState?.(() => {
+    pipOpen = true;
+    push(true);
+  }) ?? (() => {});
   const offCommand = bridge.onPipCommand((raw) => execute(raw as PipCommand));
 
   push();

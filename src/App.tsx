@@ -79,6 +79,11 @@ function useKeyboardShortcuts(): void {
       // Chrome: in plain fullscreen, Escape leaves it — even while a field is
       // focused. (NowPlaying's own Escape path below closes the cinematic
       // view, which takes the fullscreen with it.)
+      // A modal dialog is the topmost layer and owns the keyboard (Escape /
+      // Enter via its own capture listener); without this guard Space toggled
+      // playback behind a confirm dialog, and preventDefault kept the
+      // focused Confirm button dead.
+      if (useUI.getState().dialog) return;
       if (e.key === "Escape") {
         const ui = useUI.getState();
         // A context menu is the topmost layer and owns Escape: its own

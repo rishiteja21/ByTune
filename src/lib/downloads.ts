@@ -4,6 +4,7 @@ import { useSettings } from "../stores/settings";
 import { useUI } from "../stores/ui";
 import type { Track } from "../types";
 import { requireBridge } from "./bridge";
+import { staleDownloadIds } from "./download-reconcile";
 
 export function getDownload(id: string): DownloadItem | undefined {
   return useLibrary.getState().downloads[id];
@@ -89,9 +90,35 @@ export function createProgressBuffer(
   };
 }
 
+/**
+ * Boot reconciliation: the main process queue is memory-only, so registry
+ * rows persisted as "queued"/"downloading" describe work that died with the
+ * previous session — no event will ever update them, and startDownload
+ * refuses to retry while a row claims to be active. Fail the stale rows
+ * (failed stays retryable); rows still present in the live queue snapshot
+ * are left alone.
+ */
+async function reconcileStaleDownloads(): Promise<void> {
+  const bridge = window.bytune;
+  if (!bridge?.downloadQueue) return;
+  try {
+    const snapshot = (await bridge.downloadQueue()) as { id?: unknown }[];
+    const live = (Array.isArray(snapshot) ? snapshot : [])
+      .map((row) => (typeof row?.id === "string" ? row.id : ""))
+      .filter(Boolean);
+    const lib = useLibrary.getState();
+    for (const id of staleDownloadIds(lib.downloads, live)) {
+      lib.patchDownload(id, { status: "failed", progress: 0 });
+    }
+  } catch {
+    /* bridge unavailable — stale rows keep their status; cancel still works */
+  }
+}
+
 /** Subscribe to queue lifecycle events from the main process. */
 export function listenForDownloadProgress(): () => void {
   if (!window.bytune) return () => undefined;
+  void reconcileStaleDownloads();
   const applyProgress = (id: string, downloaded: number, total: number): void => {
     useLibrary.getState().patchDownload(id, {
       status: "downloading",

@@ -30,8 +30,21 @@ export function CreateMenu({ onFolderCreated }: { onFolderCreated?: (folder: Lib
       const t = e.target as Node;
       if (!ref.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
     };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      // Capture phase: the popup is the topmost layer, but App's bubble-level
+      // shortcut handler is registered first and would close whatever panel
+      // sits underneath (queue, lyrics) in the same keystroke.
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      setOpen(false);
+    };
     window.addEventListener("mousedown", onDoc);
-    return () => window.removeEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey, true);
+    };
   }, [open]);
 
   /** Drop below the + and run rightward over the main pane, the way Spotify's

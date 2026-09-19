@@ -77,6 +77,12 @@ export function validateCloudPayload(name: string, payload: unknown): void {
     }
   };
   if (name === "library") {
+    // The download registry is device-owned (local file paths + per-machine
+    // state, stripped before upload) and must never arrive from the cloud:
+    // a planted copy would hydrate into the renderer's download view and be
+    // pushed back up on the next local write. Same policy as the device
+    // settings fields below.
+    delete state.downloads;
     for (const key of ["liked", "history"]) {
       stripUnsafeThumbs(state[key]);
       if (state[key] !== undefined) records(state[key], track);

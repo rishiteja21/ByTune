@@ -28,8 +28,11 @@ import {
   searchesToBackup,
   settingsFromBackup,
   settingsToBackup,
+  storeEnvelopeFromBackup,
 } from "./backup-transfer";
 import { exportAll as statsExportAll, importAll as statsImportAll, type MonthBucket } from "./stats";
+import * as sync from "./sync";
+import * as transition from "./data-transition";
 
 const BACKUP_VERSION = 1;
 const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
@@ -106,32 +109,51 @@ export async function backupImport(
     throw new Error("That backup was written by a newer version of ByTune");
   }
 
-  // Settings: whitelist incoming keys, keep this machine's device-local ones,
-  // and write back the zustand envelope the store hydrates from on reload.
-  const nextSettings = settingsFromBackup(doc.settings, persist.readData("settings"));
-  await persist.writeData("settings", envelope(nextSettings));
+  // Store sections must be real zustand envelopes — anything else used to be
+  // written verbatim and broke the store the renderer hydrates from.
+  const nextLibrary = doc.library != null ? storeEnvelopeFromBackup(doc.library, "library") : null;
+  const nextPlayer = doc.player != null ? storeEnvelopeFromBackup(doc.player, "player") : null;
 
-  if (doc.library && typeof doc.library === "object") await persist.writeData("library", doc.library);
-  if (doc.player && typeof doc.player === "object") await persist.writeData("player", doc.player);
-  // Recent searches: plain array (current format) or a raw zustand envelope
-  // (what older exports captured — previously this import was a no-op).
-  // An absent field leaves the local store untouched.
-  if (doc.recentSearches != null) {
-    await persist.writeData("recent-searches", envelope({ searches: searchesFromBackup(doc.recentSearches) }));
-  }
+  // The write section is serialized with account switches, resets and
+  // renderer writes (dialog + parse stay outside — they must not hold the
+  // transition queue while the user browses for a file). Without this an
+  // import landing mid-changeOwner could be archived under the wrong
+  // identity, and a write queued behind a reset could resurrect erased data.
+  return transition.serializeData(async () => {
+    // Settings: whitelist incoming keys, keep this machine's device-local
+    // ones, and write back the zustand envelope the store hydrates from on
+    // reload. Re-read inside the queue so a queued write's outcome is the
+    // base, not a snapshot taken while the picker was open.
+    const nextSettings = settingsFromBackup(doc.settings, persist.readData("settings"));
+    await persist.writeData("settings", envelope(nextSettings));
+    sync.noteLocalWrite("settings");
 
-  let months = 0;
-  if (Array.isArray(doc.listening)) {
-    // The import runs synchronously on the main process; a hostile backup with
-    // millions of buckets would freeze the app for minutes. Cap at the
-    // retention horizon the stats module keeps (36 months).
-    const buckets = (doc.listening as unknown[])
-      .filter(
-        (b): b is MonthBucket => !!b && typeof b === "object" && typeof (b as MonthBucket).month === "string"
-      )
-      .slice(0, 36);
-    statsImportAll(buckets);
-    months = buckets.length;
-  }
-  return { restored: true, months };
+    if (nextLibrary) {
+      await persist.writeData("library", nextLibrary);
+      sync.noteLocalWrite("library");
+    }
+    if (nextPlayer) await persist.writeData("player", nextPlayer);
+    // Recent searches: plain array (current format) or a raw zustand envelope
+    // (what older exports captured — previously this import was a no-op).
+    // An absent field leaves the local store untouched.
+    if (doc.recentSearches != null) {
+      await persist.writeData("recent-searches", envelope({ searches: searchesFromBackup(doc.recentSearches) }));
+      sync.noteLocalWrite("recent-searches");
+    }
+
+    let months = 0;
+    if (Array.isArray(doc.listening)) {
+      // The import runs synchronously on the main process; a hostile backup with
+      // millions of buckets would freeze the app for minutes. Cap at the
+      // retention horizon the stats module keeps (36 months).
+      const buckets = (doc.listening as unknown[])
+        .filter(
+          (b): b is MonthBucket => !!b && typeof b === "object" && typeof (b as MonthBucket).month === "string"
+        )
+        .slice(0, 36);
+      statsImportAll(buckets);
+      months = buckets.length;
+    }
+    return { restored: true, months };
+  });
 }

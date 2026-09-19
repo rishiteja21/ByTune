@@ -142,7 +142,14 @@ export function ContextMenu() {
       if (target instanceof Element && target.closest("[data-menu-portal]")) return;
       close();
     };
-    const onScroll = (): void => close();
+    const onScroll = (e: Event): void => {
+      // Scrolling the menu's own list (or its submenu portal) must keep the
+      // menu up — only scroll behind the menu dismisses it.
+      const t = e.target;
+      if (t instanceof Node && ref.current?.contains(t)) return;
+      if (t instanceof Element && t.closest("[data-menu-portal]")) return;
+      close();
+    };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") {
         // First Escape folds the submenu, the second dismisses the menu.

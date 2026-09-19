@@ -452,6 +452,10 @@ export function Dialog() {
         close();
       } else if (e.key === "Enter") {
         e.preventDefault();
+        // One keystroke must not confirm the dialog AND activate whatever
+        // control behind it the focus chain reached (e.g. the search field's
+        // submit) — the dialog is the topmost layer.
+        e.stopPropagation();
         const value = req.initialValue !== undefined ? (inputRef.current?.value ?? req.initialValue) : "";
         req.onConfirm(value);
         close();

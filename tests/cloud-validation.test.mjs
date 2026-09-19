@@ -46,3 +46,25 @@ test("valid fresh-account cloud payload restores through actual sync module", as
   assert.deepEqual(Array.from((await h.api.syncNow()).pulled), ["library"]);
   assert.ok(h.writes.some(([name, data]) => name === "library" && data === payload));
 });
+test("device-owned download registry is stripped before a restored row is written", async () => {
+  const payload = {
+    state: { liked: [], playlists: [], folders: [], history: [], downloads: { "t1": { status: "done", path: "C:\\Users\\x\\y.mp3" } } },
+    version: 1,
+  };
+  const h = await fixture([row(payload)]);
+  assert.deepEqual(Array.from((await h.api.syncNow()).pulled), ["library"]);
+  const write = h.writes.find(([name]) => name === "library");
+  assert.ok(write, "library row must be written");
+  assert.equal(write[1].state.downloads, undefined);
+});
+test("library row validation strips downloads even on the restoreNow path", async () => {
+  const payload = { state: { liked: [], playlists: [], folders: [], history: [], downloads: { "t1": {} } }, version: 1 };
+  const h = await fixture([row(payload)]);
+  await h.api.restoreNow();
+  const write = h.writes.find(([name]) => name === "library");
+  assert.ok(write, "library row must be written");
+  // The planted registry is gone; what remains (an empty object) is the local
+  // device registry re-attached by the restore itself, with no local store.
+  // (Cross-realm object from the bundled module — compare keys, not identity.)
+  assert.equal(Object.keys(write[1].state.downloads ?? {}).length, 0);
+});
