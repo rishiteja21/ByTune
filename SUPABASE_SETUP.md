@@ -20,6 +20,10 @@ The app cannot talk to the cloud until you complete the ~10 minutes of setup bel
 2. Paste the whole contents of [`supabase/schema.sql`](supabase/schema.sql) → **Run**.
    It creates `profiles` (unique usernames) and `user_data` (the synced stores) with
    Row-Level Security so every account can only ever touch its own rows.
+3. **Existing projects only:** if the project was set up before usernames allowed
+   `_` and `@`, run [`supabase/migrations/0001-username-charset.sql`](supabase/migrations/0001-username-charset.sql)
+   once to widen the `profiles.username_format` CHECK constraint. Without it, the
+   app accepts `rishi_07`-style names but the database rejects them at sign-up.
 
 ## 3. Auth settings (important!)
 

@@ -838,14 +838,16 @@ html.reduce-blur .glass-strong,
 html.reduce-blur .glass-pill,
 html.reduce-blur .toast-beacon,
 html.reduce-blur .player-glass,
-html.reduce-blur .chrome-glass {
+html.reduce-blur .chrome-glass,
+html.reduce-blur .ob-card {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 html.reduce-blur .glass,
 html.reduce-blur .glass-strong,
 html.reduce-blur .glass-pill,
-html.reduce-blur .toast-beacon {
+html.reduce-blur .toast-beacon,
+html.reduce-blur .ob-card {
   background: #121212;
 }
 html.reduce-blur .player-glass,
@@ -862,7 +864,8 @@ html.reduce-blur .top-fade {
    Same chrome, no refraction: solid fills keep hierarchy without blur. */
 html.noglass .glass,
 html.noglass .glass-strong,
-html.noglass .glass-pill {
+html.noglass .glass-pill,
+html.noglass .ob-card {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   background: rgb(var(--panel));
@@ -990,127 +993,171 @@ html.noglass .chrome-glass {
 }
 
 /* ---------- onboarding stage ----------
-   Monochrome only: drifting light fields, a spinning vinyl, a live
-   equalizer. Transform/opacity animations exclusively, and everything
-   respects prefers-reduced-motion. */
+   One centered column: brand lockup, one-line message, then a single auth
+   card holding the active step. The atmosphere stays out of the way: a slow
+   light field, film grain, a vignette, and the app's now-playing equalizer
+   redrawn as a fine soundwave on the horizon. */
+
+/* Screen swap: one short direction-aware enter for the card's content, no
+   exits. The card content is keyed by the screen name so each swap replays. */
+@keyframes ob-fwd {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ob-back {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ob-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ob-screen {
+  animation: ob-fwd 0.2s var(--ease-enter) both;
+}
+.ob-screen.ob-back {
+  animation-name: ob-back;
+}
+/* Inline notes (errors) — a plain fade, no movement. */
+.ob-note {
+  animation: ob-fade 0.18s var(--ease-enter) both;
+}
 
 @keyframes ob-rise {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.985);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: none;
   }
 }
 .ob-item {
   opacity: 0;
-  animation: ob-rise 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: ob-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   animation-delay: var(--ob-delay, 0ms);
 }
 
+/* Page column — brand, message, card. margin:auto centers it in the scroll
+   host and collapses to plain flow (scrollable) on short windows. */
+.ob-page {
+  width: 100%;
+  max-width: 480px;
+  margin: auto;
+  padding: 24px 24px 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* Hero lockup — the product mark, page-scale. */
+.ob-lockup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+}
+.ob-lockup-logo {
+  height: 44px;
+  width: auto;
+}
+.ob-lockup-text {
+  height: 30px;
+  width: auto;
+}
+
+.ob-headline {
+  margin-top: 22px;
+  font-family: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: clamp(26px, 2.2vw, 30px);
+  line-height: 1.15;
+  color: rgb(var(--ink-hi));
+  text-wrap: balance;
+}
+.ob-tagline {
+  margin-top: 9px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgb(var(--ink-dim));
+  max-width: 44ch;
+}
+
+/* The auth card — the only surface on the page. The app's glass recipe,
+   dialed quiet: panel tint over the canvas, hairline, top highlight. */
+.ob-card {
+  width: 100%;
+  margin-top: 26px;
+  padding: 26px;
+  border-radius: 20px;
+  text-align: left;
+  background:
+    linear-gradient(165deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015) 55%),
+    rgb(var(--panel) / 0.62);
+  border: 1px solid rgb(var(--hairline) / var(--hairline-alpha));
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.28),
+    0 24px 64px -24px rgba(0, 0, 0, 0.8);
+}
+
+/* Focus: the shell drops focus rings app-wide; onboarding re-adds a visible
+   one for its buttons. Inputs are covered by their own focus treatment. */
+.ob-root .ob-btn:focus-visible {
+  outline: 2px solid rgb(var(--ink-hi) / 0.65);
+  outline-offset: 2px;
+}
+
+/* Atmosphere — one light field above the column, one answering glow low and
+   off to the side. Slow drifts, barely-there alpha. */
 @keyframes ob-drift-a {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(7%, 9%, 0) scale(1.18); }
+  0%, 100% { transform: none; }
+  50% { transform: translate3d(2.5%, 3%, 0) scale(1.05); }
 }
 @keyframes ob-drift-b {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1.1); }
-  50% { transform: translate3d(-8%, -6%, 0) scale(0.95); }
+  0%, 100% { transform: none; }
+  50% { transform: translate3d(-3%, -3%, 0) scale(1.04); }
 }
-@keyframes ob-drift-c {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(-6%, -9%, 0) scale(1.14); }
-}
-.ob-aurora {
+.ob-light {
   position: absolute;
-  border-radius: 9999px;
-  filter: blur(90px);
+  top: -240px;
+  left: calc(50% - 450px);
+  width: 900px;
+  height: 640px;
+  background: radial-gradient(ellipse at center, rgb(var(--primary) / 0.075), transparent 62%);
+  filter: blur(40px);
+  animation: ob-drift-a 38s ease-in-out infinite;
   will-change: transform;
 }
-.ob-aurora-a {
-  width: 540px;
-  height: 540px;
-  left: -160px;
-  top: -140px;
-  background: radial-gradient(circle, rgb(var(--primary) / 0.07), transparent 65%);
-  animation: ob-drift-a 26s ease-in-out infinite;
-}
-.ob-aurora-b {
-  width: 680px;
-  height: 680px;
-  right: -240px;
-  top: 24%;
-  background: radial-gradient(circle, rgb(var(--primary) / 0.055), transparent 65%);
-  animation: ob-drift-b 34s ease-in-out infinite;
-}
-.ob-aurora-c {
-  width: 460px;
-  height: 460px;
-  left: 32%;
-  bottom: -200px;
-  background: radial-gradient(circle, rgb(var(--primary) / 0.06), transparent 62%);
-  animation: ob-drift-c 30s ease-in-out infinite;
-}
-
-@keyframes ob-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-/* Grooved vinyl face — repeating radial rings catch light as it turns. */
-.ob-vinyl {
-  border-radius: 9999px;
-  background: repeating-radial-gradient(
-    circle at 50% 50%,
-    #050505 0px,
-    #050505 1.5px,
-    #181818 2.6px,
-    #0b0b0b 4px
-  );
-  box-shadow:
-    inset 0 0 46px rgba(0, 0, 0, 0.85),
-    0 0 70px -18px rgb(var(--primary) / 0.28);
-  animation: ob-spin 9s linear infinite;
-  will-change: transform;
-}
-/* Fixed light sheen over the spinning grooves — the record turns, the
-   room light doesn't. */
-.ob-vinyl-sheen {
-  border-radius: 9999px;
-  background: conic-gradient(
-    from 205deg,
-    transparent 0deg,
-    rgb(var(--primary) / 0.09) 16deg,
-    transparent 44deg,
-    transparent 198deg,
-    rgb(var(--primary) / 0.055) 226deg,
-    transparent 254deg
-  );
-  mix-blend-mode: screen;
-}
-.ob-vinyl-label {
-  border-radius: 9999px;
-  background: rgb(var(--primary));
-  box-shadow: 0 0 0 2px rgb(var(--base)), 0 0 0 3px rgb(var(--ink-hi) / 0.25);
-}
-.ob-vinyl-hole {
-  border-radius: 9999px;
-  background: rgb(var(--base));
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.9);
-}
-
-/* Big half-cropped backdrop vinyl, far right, breathing on a long spin. */
-.ob-vinyl-bg {
-  position: absolute;
-  width: 560px;
-  height: 560px;
+.ob-light-b {
+  top: auto;
+  left: auto;
+  bottom: -260px;
   right: -220px;
-  top: 50%;
-  margin-top: -280px;
-  opacity: 0.5;
-  animation: ob-spin 60s linear infinite;
-  will-change: transform;
+  width: 760px;
+  height: 560px;
+  background: radial-gradient(ellipse at center, rgb(var(--primary) / 0.05), transparent 62%);
+  animation: ob-drift-b 44s ease-in-out infinite;
 }
 
 /* Film grain for depth — pure texture, near-invisible. */
@@ -1126,23 +1173,37 @@ html.noglass .chrome-glass {
   background: radial-gradient(ellipse at 50% 40%, transparent 52%, rgba(0, 0, 0, 0.6) 100%);
 }
 
-/* Equalizer strip — bars breathe on staggered timings. */
+/* Soundwave horizon — the app's now-playing bars, edge-faded so they read
+   as atmosphere rather than a control. */
+.ob-eq-strip {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, 78vw);
+  height: 42px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
+}
 .ob-eq-bar {
-  width: 3px;
-  border-radius: 2px;
-  background: rgb(var(--ink-hi) / 0.09);
+  width: 2px;
+  border-radius: 1px;
+  background: rgb(var(--ink-hi) / 0.12);
   height: 100%;
   transform-origin: bottom;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ob-item {
+  .ob-item,
+  .ob-screen,
+  .ob-note {
     opacity: 1;
     animation: none;
   }
-  .ob-aurora,
-  .ob-vinyl,
-  .ob-vinyl-bg {
+  .ob-light {
     animation: none;
   }
 }

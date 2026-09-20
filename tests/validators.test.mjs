@@ -12,9 +12,12 @@ test("normalizeUsername lowercases and trims", () => {
   assert.equal(normalizeUsername("  Rishi21 "), "rishi21");
 });
 
-test("usernameTypable strips illegal characters as the user types", () => {
-  assert.equal(usernameTypable("ri_shi.21"), "rishi21");
+test("usernameTypable keeps legal characters and strips the rest as the user types", () => {
+  assert.equal(usernameTypable("ri_shi.21"), "ri_shi21");
+  assert.equal(usernameTypable("@rishi 07!"), "@rishi07");
+  assert.equal(usernameTypable("rishi@_07"), "rishi@_07");
   assert.equal(usernameTypable("rishi 21!"), "rishi21");
+  assert.equal(usernameTypable("x".repeat(30) + "_"), "x".repeat(20));
 });
 
 test("valid usernames pass", () => {
@@ -23,8 +26,14 @@ test("valid usernames pass", () => {
   }
 });
 
-test("underscores, spaces, dots, hyphens and symbols are rejected", () => {
-  for (const name of ["rishi_21", "rishi 21", "rishi.21", "rishi-21", "rishi@21", "rishi🎉"]) {
+test("underscores and @ are accepted, in any position", () => {
+  for (const name of ["rishi_07", "@rishi", "rishi@", "rishi_07@", "r@i_s_h_i", "___", "@@_"]) {
+    assert.equal(usernameProblem(name), null, name);
+  }
+});
+
+test("spaces, dots, hyphens and other symbols are still rejected", () => {
+  for (const name of ["rishi 21", "rishi.21", "rishi-21", "rishié", "rishi🎉", "rishi/21"]) {
     assert.notEqual(usernameProblem(name), null, name);
   }
 });
@@ -47,6 +56,6 @@ test("failed availability lookups read as unknown, never taken (H3)", () => {
   assert.equal(availabilityState(true), "free");
   assert.equal(availabilityState(false), "taken");
   // Offline / network error: the form must stay submittable, not show "Taken".
-  assert.equal(availabilityState(null), "idle");
-  assert.equal(availabilityState(undefined), "idle");
+  assert.equal(availabilityState(null), "unknown");
+  assert.equal(availabilityState(undefined), "unknown");
 });

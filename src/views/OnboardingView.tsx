@@ -3,13 +3,28 @@
  * (Supabase-backed, no email involved), Google OAuth through the default
  * browser, or guest mode (fully offline; data stays in this PC's app-data
  * folder and survives uninstall/reinstall). Also renders the "guest account
- * found — continue?" prompt shown on relaunches after a reinstall.
+ * found — continue?" prompt shown on relaunches after a reinstall, and the
+ * one-time username choice for fresh Google sign-ins.
+ *
+ * Composition: one centered column — brand lockup, one-line message, then a
+ * single auth card holding whichever step is active. The page is constant
+ * while the card's content swaps (short keyed enter, direction-aware), so
+ * every screen reads as the same place.
  *
  * Loading states reflect real operations only: the post-auth
- * "Restoring your library…" screen waits for the actual cloud merge.
+ * "Restoring your library…" card waits for the actual cloud merge.
  */
-import { useEffect, useRef, useState } from "react";
-import { KeyRound, Loader2, ShieldCheck, UserRound } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  Check,
+  CircleUserRound,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { CaptionButtons } from "../components/TopBar";
 import { useSession } from "../lib/session";
 import {
@@ -17,10 +32,11 @@ import {
   passwordProblem,
   usernameProblem,
   usernameTypable,
-  USERNAME_MAX,
   USERNAME_MIN,
+  type UsernameAvailability,
 } from "../lib/account-validators";
 import brandLogo from "../assets/brand/bytune-logo.svg";
+import brandText from "../assets/brand/bytune-Text.svg";
 
 type Screen = "choose" | "signup" | "signin" | "resume" | "restoring" | "pickusername";
 
@@ -31,15 +47,26 @@ function friendlyError(err: unknown): string {
   if (/failed to fetch|fetch failed|networkerror|network error|timeout|timed out/i.test(msg)) {
     return "Couldn't connect right now. Check your connection and try again.";
   }
-  if (/invalid login credentials/i.test(msg)) return "That username or password doesn't match.";
-  if (/already registered|already exists|duplicate/i.test(msg)) return "That username is already in use.";
-  if (/user already|username is already taken/i.test(msg)) return "That username is already in use.";
+  if (/invalid login credentials|wrong username or password/i.test(msg)) {
+    return "That username or password doesn't match.";
+  }
+  if (/already registered|already exists|duplicate|username is already taken/i.test(msg)) {
+    return "That username is already in use.";
+  }
+  if (/username_format|violates check constraint/i.test(msg)) {
+    // The live database still runs the old username CHECK (see
+    // supabase/migrations/0001-username-charset.sql).
+    return "That username isn't accepted yet. Try letters and numbers.";
+  }
   if (/email confirmation is enabled/i.test(msg)) {
     return "Sign-up is temporarily unavailable. Please try again later.";
   }
   if (/at least \d+ characters|letters, numbers/i.test(msg)) return msg;
   return "Something went wrong. Please try again.";
 }
+
+/** Staggered entrance delay for .ob-item elements. */
+const dly = (ms: number): React.CSSProperties => ({ ["--ob-delay" as string]: `${ms}ms` });
 
 /* ------------------------------------------------------------------ */
 /* Shared pieces                                                       */
@@ -68,39 +95,6 @@ function GoogleG({ className }: { className?: string }) {
   );
 }
 
-function BrandHeader({ title, sub }: { title: string; sub: string }) {
-  return (
-    <div className="text-center mb-8">
-      <img
-        src={brandLogo}
-        alt="ByTune"
-        className="ob-item w-[76px] h-[76px] mx-auto mb-5 animate-[spin_6s_linear_infinite]"
-        style={{ ["--ob-delay" as string]: "0ms" }}
-      />
-      <h2
-        className="ob-item font-display text-[26px] font-bold tracking-[-0.02em] mb-1.5 bg-clip-text text-transparent bg-gradient-to-b from-ink-hi to-ink-hi/60"
-        style={{ ["--ob-delay" as string]: "70ms" }}
-      >
-        {title}
-      </h2>
-      <p
-        className="ob-item text-[13.5px] text-ink-dim max-w-[360px] mx-auto leading-relaxed"
-        style={{ ["--ob-delay" as string]: "130ms" }}
-      >
-        {sub}
-      </p>
-    </div>
-  );
-}
-
-/** All onboarding buttons share this base — one press/hover/disabled system.
-    Hover lifts 1px with a soft white glow; press settles back down. */
-const btnBase =
-  "w-full flex items-center justify-center gap-2.5 rounded-xl py-3 text-[14.5px] font-semibold transition-all duration-200 ease-out hover:-translate-y-[1.5px] active:translate-y-0 active:scale-[0.99] disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:active:scale-100 select-none";
-const btnPrimary = `${btnBase} bg-primary text-on-primary hover:brightness-110 hover:shadow-[0_10px_36px_-10px_rgb(var(--primary)/0.55)]`;
-const btnSecondary = `${btnBase} bg-panel border border-ink-hi/[0.09] hover:bg-ink-hi/[0.05] hover:border-ink-hi/[0.2] hover:shadow-[0_10px_30px_-14px_rgba(0,0,0,0.8)] text-ink-hi`;
-const btnGhost = "text-[13px] text-ink-dim hover:text-ink-hi py-2 transition-colors disabled:opacity-40";
-
 function Spinner() {
   return <Loader2 className="w-4 h-4 animate-spin" />;
 }
@@ -110,30 +104,170 @@ function ErrorNote({ msg }: { msg: string | null }) {
   return (
     <p
       role="alert"
-      className="text-[12.5px] text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2 mt-3 break-words animate-rise-in"
+      className="ob-note text-[12.5px] text-red-400 bg-red-400/[0.08] border border-red-400/20 rounded-[10px] px-3 py-2 mt-3 break-words"
     >
       {msg}
     </p>
   );
 }
 
+/** Card buttons — one press/hover/disabled/focus system. Flat desktop press;
+    the primary is the only loud element in the card. */
+const btnBase =
+  "ob-btn h-11 w-full flex items-center justify-center gap-2 rounded-xl px-4 text-[13.5px] font-semibold transition-[background-color,border-color,filter,box-shadow,transform] duration-150 ease-out active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 select-none";
+const btnPrimary = `${btnBase} bg-primary text-on-primary hover:brightness-[0.94] disabled:hover:brightness-100`;
+const btnSecondary = `${btnBase} bg-ink-hi/[0.06] text-ink-hi border border-ink-hi/[0.1] hover:bg-ink-hi/[0.1] hover:border-ink-hi/[0.18]`;
+const btnTertiary = `${btnBase} text-ink border border-ink-hi/[0.16] hover:bg-ink-hi/[0.07] hover:border-ink-hi/[0.3] hover:shadow-[0_0_24px_-6px_rgb(var(--primary)/0.35)]`;
+const btnGhost =
+  "ob-btn h-9 inline-flex items-center justify-center gap-2 rounded-lg px-3 text-[13px] text-ink-dim hover:text-ink-hi transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed select-none";
+
+/** Card title + optional one-line hint. */
+function CardHead({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="mb-5">
+      <h2 className="text-[17px] font-bold tracking-[-0.01em] text-ink-hi">{title}</h2>
+      {hint && <p className="text-[13px] text-ink-dim mt-1 leading-relaxed">{hint}</p>}
+    </div>
+  );
+}
+
+/** Text input with a leading glyph and an optional trailing affordance. */
 function Field({
   icon: Icon,
+  trailing,
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement> & { icon: React.ComponentType<{ className?: string }> }) {
+}: React.InputHTMLAttributes<HTMLInputElement> & {
+  icon: React.ComponentType<{ className?: string }>;
+  trailing?: ReactNode;
+}) {
   return (
     <div className="relative">
-      <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-[17px] h-[17px] text-ink-dim pointer-events-none" />
+      <Icon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-dim pointer-events-none" />
       <input
         {...props}
-        className="w-full bg-panel border border-ink-hi/[0.1] focus:border-primary/60 rounded-xl pl-11 pr-4 py-3 text-[14px] outline-none transition-colors placeholder:text-ink-dim/60 disabled:opacity-50"
+        className="h-11 w-full bg-black/25 border border-ink-hi/[0.09] rounded-xl pl-10 pr-4 text-[14px] text-ink-hi outline-none transition-[border-color,background-color,box-shadow] duration-150 placeholder:text-ink-ghost disabled:opacity-50 focus:border-ink-hi/35 focus:bg-black/40 focus:shadow-[0_0_0_3px_rgb(var(--ink-hi)/0.06)]"
       />
+      {trailing}
+    </div>
+  );
+}
+
+/** Password input with a reveal toggle — desktop apps never make you type
+    a long password blind. */
+function PasswordField(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-dim pointer-events-none" />
+      <input
+        type={show ? "text" : "password"}
+        {...props}
+        className="h-11 w-full bg-black/25 border border-ink-hi/[0.09] rounded-xl pl-10 pr-12 text-[14px] text-ink-hi outline-none transition-[border-color,background-color,box-shadow] duration-150 placeholder:text-ink-ghost disabled:opacity-50 focus:border-ink-hi/35 focus:bg-black/40 focus:shadow-[0_0_0_3px_rgb(var(--ink-hi)/0.06)]"
+      />
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        aria-label={show ? "Hide password" : "Show password"}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 grid place-items-center rounded-lg text-ink-dim hover:text-ink-hi hover:bg-ink-hi/[0.07] transition-colors"
+      >
+        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Username + password form (sign up / sign in)                        */
+/* Username availability                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Debounced live availability for a well-formed username. Clearing the timer
+ * doesn't cancel a request already in flight, so a slow answer for an earlier
+ * name must never overwrite the current one's verdict (stale-guard). A failed
+ * lookup reads as "unknown": the form stays submittable and the database
+ * UNIQUE constraint decides for real at sign-up.
+ */
+function useUsernameAvailability(username: string, active: boolean): UsernameAvailability {
+  const [state, setState] = useState<UsernameAvailability>("idle");
+  useEffect(() => {
+    if (!active) {
+      setState("idle");
+      return;
+    }
+    let stale = false;
+    setState("checking");
+    const t = setTimeout(async () => {
+      try {
+        const res = (await window.bytune?.authUsernameAvailable(username.trim())) as
+          | { available: boolean | null; reason?: string }
+          | undefined;
+        if (!stale) setState(availabilityState(res?.available));
+      } catch {
+        if (!stale) setState("unknown");
+      }
+    }, 450);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
+  }, [username, active]);
+  return state;
+}
+
+/** Reserved-height status row under the username field. Every state has a
+    home here, so availability feedback never shifts the layout. */
+function UsernameHint({
+  name,
+  state,
+  formatProblem,
+}: {
+  name: string;
+  state: UsernameAvailability;
+  formatProblem: string | null;
+}) {
+  let content: ReactNode = <>Letters, numbers, _ and @.</>;
+  if (formatProblem) {
+    content =
+      formatProblem === `Username must be at least ${USERNAME_MIN} characters.` ? (
+        <>At least {USERNAME_MIN} characters.</>
+      ) : (
+        <>{formatProblem}</>
+      );
+  } else if (state === "checking") {
+    content = (
+      <>
+        <Loader2 className="w-3 h-3 animate-spin" /> Checking availability…
+      </>
+    );
+  } else if (state === "free") {
+    content = (
+      <>
+        <Check className="w-3.5 h-3.5" /> {name} is available
+      </>
+    );
+  } else if (state === "taken") {
+    content = <>{name} is already taken</>;
+  } else if (state === "unknown") {
+    content = <>Couldn't check availability. You can still continue.</>;
+  }
+  return (
+    <div
+      aria-live="polite"
+      className={`h-[18px] mt-1.5 px-1 flex items-center gap-1.5 text-[12px] leading-none ${
+        state === "free" && !formatProblem
+          ? "text-emerald-400/90"
+          : state === "taken" && !formatProblem
+            ? "text-amber-400/90"
+            : "text-ink-ghost"
+      }`}
+    >
+      {content}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Card: username + password form (sign up / sign in)                  */
 /* ------------------------------------------------------------------ */
 
 function UsernamePasswordForm({
@@ -150,43 +284,17 @@ function UsernamePasswordForm({
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [usernameState, setUsernameState] = useState<"idle" | "checking" | "free" | "taken">("idle");
-  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const formatProblem = mode === "signup" && username.length > 0 ? usernameProblem(username) : null;
-
-  // Live "is this name free?" — debounced, only for well-formed names.
-  useEffect(() => {
-    if (mode !== "signup" || formatProblem || username.trim().length < USERNAME_MIN) {
-      setUsernameState("idle");
-      return;
-    }
-    if (debounce.current) clearTimeout(debounce.current);
-    setUsernameState("checking");
-    // Clearing the timer doesn't cancel a request already in flight — a slow
-    // answer for an earlier name must not overwrite the current one's verdict
-    // (a stale "taken" blocked submit outright).
-    let stale = false;
-    debounce.current = setTimeout(async () => {
-      try {
-        const res = (await window.bytune?.authUsernameAvailable(username.trim())) as
-          | { available: boolean | null; reason?: string }
-          | undefined;
-        if (!stale) setUsernameState(availabilityState(res?.available));
-      } catch {
-        if (!stale) setUsernameState("idle");
-      }
-    }, 450);
-    return () => {
-      stale = true;
-      if (debounce.current) clearTimeout(debounce.current);
-    };
-  }, [username, mode, formatProblem]);
+  const availability = useUsernameAvailability(
+    username,
+    mode === "signup" && !formatProblem && username.trim().length >= USERNAME_MIN
+  );
 
   const canSubmit =
     username.trim().length >= USERNAME_MIN &&
     password.length > 0 &&
-    (mode === "signin" || (confirm.length > 0 && usernameState !== "taken" && !formatProblem)) &&
+    (mode === "signin" || (confirm.length > 0 && availability !== "taken" && !formatProblem)) &&
     !busy;
 
   const google = async (): Promise<void> => {
@@ -242,65 +350,49 @@ function UsernamePasswordForm({
   };
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="animate-rise-in">
-      <BrandHeader
-        title={mode === "signup" ? "Create your account" : "Sign in to continue"}
-        sub={
-          mode === "signup"
-            ? "Your library, playlists and history back up to your account automatically."
-            : "Your library picks up right where you left it."
-        }
+    <form onSubmit={(e) => void submit(e)}>
+      <CardHead
+        title={mode === "signup" ? "Create your account" : "Welcome back"}
+        hint={mode === "signup" ? undefined : "Pick up right where you left off."}
       />
       <div className="space-y-3">
-        <div className="relative">
+        <div>
           <Field
             icon={UserRound}
             autoFocus
             value={username}
             onChange={(e) => setUsername(usernameTypable(e.target.value))}
             placeholder="Username"
-            autoComplete="off"
+            autoComplete="username"
+            autoCapitalize="off"
+            autoCorrect="off"
             spellCheck={false}
             disabled={busy}
             aria-label="Username"
+            trailing={
+              availability === "checking" ? (
+                <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-dim animate-spin" />
+              ) : undefined
+            }
           />
-          {usernameState === "checking" && (
-            <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-dim animate-spin" />
-          )}
-          {usernameState === "free" && (
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11.5px] text-emerald-400" role="status">
-              Available
-            </span>
-          )}
-          {usernameState === "taken" && (
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11.5px] text-amber-400" role="alert">
-              Taken
-            </span>
+          {mode === "signup" && (
+            <UsernameHint name={username.trim()} state={availability} formatProblem={formatProblem} />
           )}
         </div>
-        {mode === "signup" && username.length > 0 && formatProblem && (
-          <p className="text-[12px] text-ink-dim px-1" role="status">
-            {formatProblem === `Username must be at least ${USERNAME_MIN} characters.`
-              ? `At least ${USERNAME_MIN} characters. Letters and numbers only.`
-              : formatProblem}
-          </p>
-        )}
-        <Field
-          icon={KeyRound}
-          type="password"
+        <PasswordField
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder={mode === "signup" ? "Password" : "Password"}
+          placeholder="Password"
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
           disabled={busy}
           aria-label="Password"
         />
         {mode === "signup" && (
-          <Field
-            icon={KeyRound}
-            type="password"
+          <PasswordField
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Confirm password"
+            autoComplete="new-password"
             disabled={busy}
             aria-label="Confirm password"
           />
@@ -308,11 +400,9 @@ function UsernamePasswordForm({
       </div>
       <ErrorNote msg={error} />
       {mode === "signup" && (
-        <p className="text-[12px] text-ink-dim px-1 mt-3 leading-relaxed flex gap-1.5">
-          <ShieldCheck className="w-4 h-4 shrink-0 mt-[1px]" />
-          <span>
-            There's no email on this account, so your password can't be recovered. Save it somewhere safe.
-          </span>
+        <p className="text-[12px] text-ink-dim mt-3.5 leading-relaxed flex gap-2">
+          <ShieldCheck className="w-4 h-4 shrink-0 mt-[1px] text-ink-ghost" />
+          <span>There's no email on this account, so your password can't be recovered. Save it somewhere safe.</span>
         </p>
       )}
       <button type="submit" disabled={!canSubmit} className={`${btnPrimary} mt-5`}>
@@ -326,19 +416,13 @@ function UsernamePasswordForm({
           "Sign in"
         )}
       </button>
-      <button
-        type="button"
-        onClick={() => void google()}
-        className={`${btnSecondary} mt-2.5`}
-        disabled={busy}
-      >
-        {busy ? <Spinner /> : <GoogleG className="w-[18px] h-[18px]" />} Continue with Google
+      <button type="button" onClick={() => void google()} className={`${btnSecondary} mt-2.5`} disabled={busy}>
+        {busy ? <Spinner /> : <GoogleG className="w-[17px] h-[17px]" />} Continue with Google
       </button>
-      <div className="flex items-center justify-center mt-3">
+      <div className="flex items-center justify-between mt-4">
         <button type="button" onClick={onBack} className={btnGhost}>
           Back
         </button>
-        <span className="text-ink-dim/40 mx-2">·</span>
         <button
           type="button"
           onClick={() => navigate(mode === "signup" ? "signin" : "signup")}
@@ -352,10 +436,16 @@ function UsernamePasswordForm({
 }
 
 /* ------------------------------------------------------------------ */
-/* Choose screen                                                       */
+/* Card: choose screen                                                 */
 /* ------------------------------------------------------------------ */
 
-function ChooseScreen({ onPick, navigate }: { onPick: (screen: "signup" | "signin") => void; navigate: (s: Screen) => void }) {
+function ChooseContent({
+  onPick,
+  navigate,
+}: {
+  onPick: (screen: "signup" | "signin") => void;
+  navigate: (s: Screen) => void;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"none" | "guest" | "google">("none");
 
@@ -394,50 +484,42 @@ function ChooseScreen({ onPick, navigate }: { onPick: (screen: "signup" | "signi
   };
 
   return (
-    <div className="animate-rise-in">
-      <BrandHeader
-        title="Your music. Your space."
-        sub="Create an account to back up your library and playlists, or jump straight in."
-      />
+    <div>
       <div className="space-y-2.5">
         <button
           onClick={() => onPick("signup")}
           className={`${btnPrimary} ob-item`}
-          style={{ ["--ob-delay" as string]: "200ms" }}
+          style={dly(60)}
           disabled={busy !== "none"}
         >
-          <UserRound className="w-[18px] h-[18px]" /> Create account
+          <UserRound className="w-4 h-4" /> Create account
         </button>
         <button
           onClick={() => onPick("signin")}
           className={`${btnSecondary} ob-item`}
-          style={{ ["--ob-delay" as string]: "270ms" }}
+          style={dly(110)}
           disabled={busy !== "none"}
         >
-          <KeyRound className="w-[18px] h-[18px]" /> Sign in
+          <KeyRound className="w-4 h-4" /> Sign in
         </button>
         <button
           onClick={() => void google()}
           className={`${btnSecondary} ob-item`}
-          style={{ ["--ob-delay" as string]: "340ms" }}
+          style={dly(160)}
           disabled={busy !== "none"}
         >
-          {busy === "google" ? <Spinner /> : <GoogleG className="w-[18px] h-[18px]" />} Continue with Google
+          {busy === "google" ? <Spinner /> : <GoogleG className="w-[17px] h-[17px]" />} Continue with Google
         </button>
       </div>
-      <div
-        className="my-5 flex items-center gap-3 ob-item"
-        style={{ ["--ob-delay" as string]: "410ms" }}
-        aria-hidden="true"
-      >
-        <div className="h-px flex-1 bg-ink-hi/[0.08]" />
-        <span className="text-[11px] uppercase tracking-[0.12em] text-ink-dim/70">or</span>
-        <div className="h-px flex-1 bg-ink-hi/[0.08]" />
+      <div className="my-5 flex items-center gap-3 ob-item" style={dly(210)} aria-hidden="true">
+        <div className="h-px flex-1 bg-ink-hi/[0.09]" />
+        <span className="micro-label text-ink-ghost">or</span>
+        <div className="h-px flex-1 bg-ink-hi/[0.09]" />
       </div>
       <button
         onClick={() => void guest()}
-        className={`${btnGhost} w-full ob-item`}
-        style={{ ["--ob-delay" as string]: "470ms" }}
+        className={`${btnTertiary} ob-item`}
+        style={dly(250)}
         disabled={busy !== "none"}
       >
         {busy === "guest" ? (
@@ -445,14 +527,13 @@ function ChooseScreen({ onPick, navigate }: { onPick: (screen: "signup" | "signi
             <Spinner /> Starting…
           </span>
         ) : (
-          "Continue as guest"
+          <>
+            <CircleUserRound className="w-4 h-4" /> Continue as guest
+          </>
         )}
       </button>
-      <p
-        className="text-[11.5px] text-ink-dim/80 text-center mt-3 leading-relaxed ob-item"
-        style={{ ["--ob-delay" as string]: "530ms" }}
-      >
-        Guests stay on this PC. Data survives reinstall, but isn't backed up.
+      <p className="text-[12px] text-ink-ghost mt-2 leading-relaxed text-center ob-item" style={dly(290)}>
+        Guest mode keeps your data on this PC. It survives reinstall, but isn't backed up.
       </p>
       <ErrorNote msg={error} />
     </div>
@@ -460,25 +541,16 @@ function ChooseScreen({ onPick, navigate }: { onPick: (screen: "signup" | "signi
 }
 
 /* ------------------------------------------------------------------ */
-/* Guest resume (reinstall)                                            */
+/* Card: guest resume (reinstall)                                      */
 /* ------------------------------------------------------------------ */
 
-function ResumeScreen({ onSignInInstead }: { onSignInInstead: () => void }) {
+function ResumeContent({ onSignInInstead }: { onSignInInstead: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
-    <div className="animate-rise-in">
-      <BrandHeader title="Welcome back" sub="We found guest data from a previous install on this PC." />
-      <div className="rounded-2xl bg-panel border border-ink-hi/[0.08] px-5 py-4 flex items-center gap-4">
-        <UserRound className="w-7 h-7 text-primary shrink-0" />
-        <div>
-          <div className="text-[15px] font-semibold">Guest account found</div>
-          <div className="text-[12.5px] text-ink-dim mt-0.5 leading-snug">
-            Your library, playlists and history from before are still here.
-          </div>
-        </div>
-      </div>
-      <div className="mt-5 space-y-2.5">
+    <div>
+      <CardHead title="Welcome back" hint="We found your guest library from a previous install on this PC." />
+      <div className="space-y-2.5">
         <button
           disabled={busy}
           onClick={async () => {
@@ -495,74 +567,61 @@ function ResumeScreen({ onSignInInstead }: { onSignInInstead: () => void }) {
           }}
           className={btnPrimary}
         >
-          Continue as guest
+          {busy ? (
+            <span className="inline-flex items-center gap-2">
+              <Spinner /> Starting…
+            </span>
+          ) : (
+            "Continue as guest"
+          )}
         </button>
         <button disabled={busy} onClick={onSignInInstead} className={btnSecondary}>
           Sign in with an account instead
         </button>
-        <p className="text-[11.5px] text-ink-dim/80 text-center leading-relaxed pt-1">
-          Signing in later carries your guest data over. Nothing is deleted either way.
+      </div>
+      <p className="text-[12px] text-ink-ghost leading-relaxed mt-3.5">
+        Signing in later carries your guest data over. Nothing is deleted either way.
+      </p>
+      <ErrorNote msg={error} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Card: restoring — real state, shown while the cloud merge runs      */
+/* ------------------------------------------------------------------ */
+
+function RestoringContent() {
+  return (
+    <div>
+      <CardHead title="Restoring your library" />
+      <div className="flex items-center gap-3 py-2">
+        <Loader2 className="w-5 h-5 animate-spin text-primary shrink-0" />
+        <p className="text-[13.5px] text-ink-dim leading-relaxed">
+          Playlists, likes and history are coming back.
         </p>
-        <ErrorNote msg={error} />
       </div>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Restoring — real state, shown while the cloud merge runs            */
+/* Card: pick username — one-time choice for fresh Google sign-ins     */
 /* ------------------------------------------------------------------ */
 
-function RestoringScreen() {
-  return (
-    <div className="animate-rise-in text-center">
-      <Loader2 className="w-7 h-7 animate-spin text-primary mx-auto mb-4" />
-      <h2 className="text-[17px] font-semibold mb-1.5">Restoring your library…</h2>
-      <p className="text-[13px] text-ink-dim">Liking songs, playlists and history are coming back.</p>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Pick username — one-time choice for fresh Google sign-ins           */
-/* ------------------------------------------------------------------ */
-
-function PickUsernameScreen() {
+function PickUsernameContent() {
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [state, setState] = useState<"idle" | "checking" | "free" | "taken">("idle");
-  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const formatProblem = username.length > 0 ? usernameProblem(username) : null;
-
-  useEffect(() => {
-    if (formatProblem || username.trim().length < USERNAME_MIN) {
-      setState("idle");
-      return;
-    }
-    if (debounce.current) clearTimeout(debounce.current);
-    setState("checking");
-    // A slow verdict for an earlier name must not overwrite the current one's.
-    let stale = false;
-    debounce.current = setTimeout(async () => {
-      try {
-        const res = (await window.bytune?.authUsernameAvailable(username.trim())) as
-          | { available: boolean | null }
-          | undefined;
-        if (!stale) setState(availabilityState(res?.available));
-      } catch {
-        if (!stale) setState("idle");
-      }
-    }, 450);
-    return () => {
-      stale = true;
-      if (debounce.current) clearTimeout(debounce.current);
-    };
-  }, [username, formatProblem]);
+  const availability = useUsernameAvailability(
+    username,
+    !formatProblem && username.trim().length >= USERNAME_MIN
+  );
 
   const save = async (): Promise<void> => {
-    if (busy || state === "taken" || formatProblem) return;
+    if (busy || availability === "taken" || formatProblem) return;
     setBusy(true);
     setError(null);
     try {
@@ -593,41 +652,31 @@ function PickUsernameScreen() {
   };
 
   return (
-    <div className="animate-rise-in">
-      <BrandHeader
-        title="Set your username"
-        sub="This is how you'll be known in ByTune. Letters and numbers only. You can change it later in Settings."
+    <div>
+      <CardHead title="Choose your username" hint="This is how you'll appear in ByTune. You can change it later in Settings." />
+      <Field
+        icon={UserRound}
+        autoFocus
+        value={username}
+        onChange={(e) => setUsername(usernameTypable(e.target.value))}
+        placeholder="Username"
+        autoComplete="username"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        disabled={busy}
+        aria-label="Username"
+        trailing={
+          availability === "checking" ? (
+            <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-dim animate-spin" />
+          ) : undefined
+        }
       />
-      <div className="relative">
-        <Field
-          icon={UserRound}
-          autoFocus
-          value={username}
-          onChange={(e) => setUsername(usernameTypable(e.target.value))}
-          placeholder="Username"
-          autoComplete="off"
-          spellCheck={false}
-          disabled={busy}
-          aria-label="Username"
-        />
-        {state === "checking" && (
-          <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-dim animate-spin" />
-        )}
-        {state === "free" && (
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11.5px] text-emerald-400" role="status">
-            Available
-          </span>
-        )}
-        {state === "taken" && (
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11.5px] text-amber-400" role="alert">
-            Taken
-          </span>
-        )}
-      </div>
-      <ErrorNote msg={error ?? formatProblem} />
+      <UsernameHint name={username.trim()} state={availability} formatProblem={formatProblem} />
+      <ErrorNote msg={error} />
       <button
         onClick={() => void save()}
-        disabled={busy || state === "taken" || !!formatProblem || username.trim().length < USERNAME_MIN}
+        disabled={busy || availability === "taken" || !!formatProblem || username.trim().length < USERNAME_MIN}
         className={`${btnPrimary} mt-5`}
       >
         {busy ? (
@@ -638,12 +687,9 @@ function PickUsernameScreen() {
           "Continue"
         )}
       </button>
-      <button onClick={() => void skip()} disabled={busy} className={`${btnGhost} w-full mt-1`}>
+      <button onClick={() => void skip()} disabled={busy} className={`${btnGhost} w-full mt-2`}>
         Skip for now
       </button>
-      <p className="text-[11.5px] text-ink-dim/80 text-center mt-3 leading-relaxed">
-        Your library is syncing in the background. This won't take long.
-      </p>
     </div>
   );
 }
@@ -652,19 +698,20 @@ function PickUsernameScreen() {
 /* Shell                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Equalizer strip along the bottom edge — stable pseudo-random timings so
-    bars never re-randomise between renders. Purely decorative. */
+/** Fine soundwave along the bottom edge — the app's now-playing motif,
+    redrawn as a quiet horizon. Stable pseudo-random timings so bars never
+    re-randomise between renders, edge-faded so it never reads as a widget. */
 function EqualizerStrip() {
-  const bars = useRef(
-    Array.from({ length: 42 }, (_, i) => ({
-      duration: 0.8 + ((i * 7919) % 13) / 10,
-      delay: ((i * 104729) % 23) / 10,
-      height: 0.35 + ((i * 6151) % 65) / 100,
+  const bars = useState(
+    Array.from({ length: 56 }, (_, i) => ({
+      duration: 0.9 + ((i * 7919) % 17) / 12,
+      delay: ((i * 104729) % 29) / 10,
+      height: 0.16 + ((i * 6151) % 84) / 100,
     }))
-  ).current;
+  )[0];
 
   return (
-    <div className="absolute inset-x-0 bottom-0 h-20 flex items-end justify-center gap-[7px] px-12" aria-hidden="true">
+    <div className="ob-eq-strip" aria-hidden="true">
       {bars.map((b, i) => (
         <div
           key={i}
@@ -682,39 +729,59 @@ function EqualizerStrip() {
 
 export function Onboarding({ initial }: { initial: Screen }) {
   const [screen, setScreen] = useState<Screen>(initial);
+  const [dir, setDir] = useState<"fwd" | "back">("fwd");
+  const navigate = (s: Screen, d: "fwd" | "back" = "fwd"): void => {
+    setDir(d);
+    setScreen(s);
+  };
 
   return (
-    <div className="h-screen flex flex-col bg-canvas text-ink overflow-hidden select-none relative">
-      {/* Backdrop stage: drifting light fields, a giant half-cropped vinyl
-          turning in the dark, film grain and a vignette. Purely decorative. */}
+    <div className="ob-root h-screen flex flex-col bg-canvas text-ink overflow-hidden select-none relative">
+      {/* Atmosphere: one slow light field above, film grain and a vignette,
+          and a fine soundwave on the horizon. Nothing else. */}
       <div aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="ob-aurora ob-aurora-a" />
-        <div className="ob-aurora ob-aurora-b" />
-        <div className="ob-aurora ob-aurora-c" />
-        <div className="ob-vinyl-bg ob-vinyl" />
-        <div className="ob-vinyl-sheen absolute" style={{ width: 560, height: 560, right: -220, top: "50%", marginTop: -280 }} />
+        <div className="ob-light" />
+        <div className="ob-light ob-light-b" />
         <div className="ob-grain" />
         <div className="ob-vignette" />
         <EqualizerStrip />
       </div>
 
-      {/* Frameless-window chrome: a drag strip with the caption buttons — the
-          main shell gets these from TopBar; onboarding renders none otherwise. */}
+      {/* Frameless-window chrome: a bare drag strip with the caption buttons.
+          Branding lives in the page, not the title bar. */}
       <div className="app-drag h-12 shrink-0 flex items-start justify-end relative z-10">
         <CaptionButtons />
       </div>
-      <div className="flex-1 flex items-center justify-center overflow-y-auto relative z-10">
-        <div className="w-[400px] max-w-[92vw] py-6">
-          {screen === "choose" && <ChooseScreen onPick={setScreen} navigate={setScreen} />}
-          {screen === "signup" && (
-            <UsernamePasswordForm mode="signup" onBack={() => setScreen("choose")} navigate={setScreen} />
-          )}
-          {screen === "signin" && (
-            <UsernamePasswordForm mode="signin" onBack={() => setScreen("choose")} navigate={setScreen} />
-          )}
-          {screen === "resume" && <ResumeScreen onSignInInstead={() => setScreen("choose")} />}
-          {screen === "restoring" && <RestoringScreen />}
-          {screen === "pickusername" && <PickUsernameScreen />}
+
+      <div className="flex-1 min-h-0 overflow-y-auto relative z-10 flex flex-col">
+        <div className="ob-page">
+          <div className="ob-hero">
+            <div className="ob-lockup">
+              <img src={brandLogo} alt="" aria-hidden className="ob-lockup-logo ob-item" />
+              <img src={brandText} alt="ByTune" className="ob-lockup-text ob-item" style={dly(70)} />
+            </div>
+            <h1 className="ob-headline ob-item" style={dly(140)}>
+              Your music lives here.
+            </h1>
+            <p className="ob-tagline ob-item" style={dly(200)}>
+              One player for streaming and your own library.
+            </p>
+          </div>
+
+          <div className="ob-card ob-item" style={dly(260)}>
+            <div key={screen} className={`ob-screen ${dir === "back" ? "ob-back" : "ob-fwd"}`}>
+              {screen === "choose" && <ChooseContent onPick={(s) => navigate(s)} navigate={navigate} />}
+              {screen === "signup" && (
+                <UsernamePasswordForm mode="signup" onBack={() => navigate("choose", "back")} navigate={navigate} />
+              )}
+              {screen === "signin" && (
+                <UsernamePasswordForm mode="signin" onBack={() => navigate("choose", "back")} navigate={navigate} />
+              )}
+              {screen === "resume" && <ResumeContent onSignInInstead={() => navigate("choose", "back")} />}
+              {screen === "restoring" && <RestoringContent />}
+              {screen === "pickusername" && <PickUsernameContent />}
+            </div>
+          </div>
         </div>
       </div>
     </div>

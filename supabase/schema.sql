@@ -5,12 +5,13 @@
 -- One row per user. The UNIQUE constraint is what guarantees no two
 -- accounts can ever claim the same username (the app checks availability
 -- first, but the database is the real gate). Usernames are stored lowercase
--- (case-insensitive uniqueness) and may contain only a-z and 0-9.
+-- (case-insensitive uniqueness) and may contain a-z, 0-9, underscore and @.
+-- Keep this in sync with USERNAME_RE in src/lib/account-validators.ts.
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
   created_at timestamptz not null default now(),
-  constraint username_format check (username ~ '^[a-z0-9]{3,20}$')
+  constraint username_format check (username ~ '^[a-z0-9_@]{3,20}$')
 );
 
 -- One row per (user, local store): library, settings, recent-searches.

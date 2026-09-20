@@ -309,7 +309,7 @@ function CloudAccountGroup() {
   const changeUsername = (): void => {
     openDialog({
       title: "Change username",
-      body: "Letters and numbers only. The new name must not already be taken.",
+      body: "Letters, numbers, _ and @. The new name must not already be taken.",
       initialValue: session.username ?? "",
       confirmLabel: "Rename",
       onConfirm: (value) => {
@@ -402,7 +402,7 @@ function CloudAccountGroup() {
                 try {
                   await window.bytune?.authClearGuestProfile();
                 } catch {
-                  useUI.getState().toast("Couldn't open onboarding — try again", "error");
+                  useUI.getState().toast("Couldn't open onboarding. Try again.", "error");
                   return;
                 }
               }
@@ -819,7 +819,7 @@ export function SettingsView() {
             try {
               await window.bytune?.authClearGuestProfile();
             } catch {
-              useUI.getState().toast("Couldn't open onboarding — try again", "error");
+              useUI.getState().toast("Couldn't open onboarding. Try again.", "error");
               return;
             }
             setOnboardingIntent("signin");
@@ -830,7 +830,7 @@ export function SettingsView() {
             try {
               await window.bytune?.authClearGuestProfile();
             } catch {
-              useUI.getState().toast("Couldn't open onboarding — try again", "error");
+              useUI.getState().toast("Couldn't open onboarding. Try again.", "error");
               return;
             }
             setOnboardingIntent("signup");

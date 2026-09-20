@@ -15,6 +15,14 @@ export const OAUTH_REDIRECT = "bytune://oauth/callback";
 /** Local JSON stores replicated to the cloud when signed in. */
 export const SYNCED_STORES = ["library", "settings", "recent-searches", "listening-signals"] as const;
 
-/** Username namespace that never collides with real email addresses. */
+/**
+ * Username namespace that never collides with real email addresses.
+ *
+ * Usernames may contain `_` and `@`; the auth provider's email validation
+ * rejects a raw `@` inside the local part, so every `@` maps to `--`. The
+ * mapping is injective over the allowed charset (`-` is not a legal username
+ * character, so `--` can only ever come from an `@`), and names without `@`
+ * map exactly as they always have — existing accounts are unaffected.
+ */
 export const syntheticEmail = (username: string): string =>
-  `${username.toLowerCase()}@users.bytune.local`;
+  `${username.toLowerCase().replace(/@/g, "--")}@users.bytune.local`;
