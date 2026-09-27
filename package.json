@@ -48,7 +48,6 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "ByTune-Setup-${version}.${ext}",
       "shortcutName": "ByTune"
     }
   },
