@@ -16,6 +16,25 @@
  *     fade is armed so it *starts* on a beat multiple inside the configured
  *     window. Analysis failing ⇒ honest fallback to the standard fade.
  *   - manual next/prev/seek aborts any fade in flight.
+ *
+ * Transition states, and the invariant they exist to protect:
+ *
+ *   idle     — one live deck; the session player is the only one playing.
+ *   armed    — the next track is resolved and sits on the standby deck.
+ *   blending — the standby deck is PLAYING and audible while the session
+ *              player fades out. Two decks are live, and the standby's media
+ *              clock is authoritative for the track it is playing.
+ *   settled  — the standby deck was promoted to session player.
+ *
+ *   IF A TRACK IS ALREADY PLAYING DURING A BLEND, THE TRANSITION'S COMPLETION
+ *   MUST PROMOTE THAT DECK. Re-running the fresh-track path would reload the
+ *   same track from 0:00 and replay the seconds the listener just heard.
+ *
+ * Two independent signals mean "the transition is over": the blend timer
+ * reaching the end of its curve, and the outgoing element's `ended`. They race
+ * by a few milliseconds — the fade timeline starts after an async resolve and a
+ * play(), so `ended` usually lands first — so both funnel through one
+ * idempotent completion, and the deck that is already playing wins either way.
  */
 import { useLibrary } from "../stores/library";
 import { usePlayer } from "../stores/player";
@@ -62,6 +81,20 @@ let fadeTimer: number | null = null;
 /** arming window: resolve/start the next track this long before the fade point */
 const ARM_LEAD_MS = 4000;
 let armed: { toId: string } | null = null;
+/**
+ * Bumped whenever something invalidates an in-flight arming (a track change, a
+ * completed or aborted transition). `beginFade` awaits several times before it
+ * starts the standby deck; without this its continuation could wake up after
+ * the world moved on and start a track the user already skipped past.
+ */
+let transitionToken = 0;
+/** True while a completion is promoting a deck — makes completion idempotent. */
+let settling = false;
+
+/** Derived phase, for callers that must not fight an in-flight transition. */
+function transitioning(): boolean {
+  return fade !== null || armed !== null;
+}
 /** silence trims per track id — seconds to skip at the start / before the end */
 const silenceTrims = new Map<string, { head: number; tail: number }>();
 const MAX_TRIMS = 400;
@@ -396,6 +429,9 @@ function maybeArmTransition(): void {
 
 async function beginFade(nextTrack: Track, fadeMs: number): Promise<void> {
   const stand = standbyEl();
+  const token = ++transitionToken;
+  /** The arming this continuation belongs to is still the live one. */
+  const stale = (): boolean => token !== transitionToken;
   try {
     const url = await requireBridge().getStreamUrl(nextTrack.id, false, useSettings.getState().streamingQuality);
     // The fade's standby element carries the incoming track's own loudness
@@ -403,7 +439,7 @@ async function beginFade(nextTrack: Track, fadeMs: number): Promise<void> {
     void fetchLoudness(url, nextTrack.id);
     // The world may have moved on while we resolved.
     const cur = usePlayer.getState().queue[usePlayer.getState().index];
-    if (!armed || armed.toId !== nextTrack.id || fade || cur?.id === nextTrack.id) {
+    if (stale() || !armed || armed.toId !== nextTrack.id || fade || cur?.id === nextTrack.id) {
       armed = null;
       return;
     }
@@ -415,7 +451,7 @@ async function beginFade(nextTrack: Track, fadeMs: number): Promise<void> {
         new Promise<void>((r) => window.setTimeout(r, 2200)),
       ]);
     }
-    if (!armed || armed.toId !== nextTrack.id || fade) {
+    if (stale() || !armed || armed.toId !== nextTrack.id || fade) {
       armed = null;
       return;
     }
@@ -428,7 +464,7 @@ async function beginFade(nextTrack: Track, fadeMs: number): Promise<void> {
     armed = null;
     const waitMs = startAt - performance.now();
     if (waitMs > 30) await new Promise<void>((r) => window.setTimeout(r, waitMs));
-    if (fade) return;
+    if (stale() || fade) return;
     // If the user interacted meanwhile, re-check.
     const s2 = usePlayer.getState();
     if (s2.index >= s2.queue.length - 1 || s2.queue[s2.index + 1]?.id !== nextTrack.id) return;
@@ -484,6 +520,13 @@ function driveFade(): void {
       abortFade(false);
       return;
     }
+    // A track shorter than the blend runs out mid-transition. Promoting it
+    // there is the only outcome that isn't a silent gap: the blend would
+    // otherwise keep fading a deck with nothing left to fade in.
+    if (standbyEl().ended) {
+      completeTransition("incoming-ended");
+      return;
+    }
     // The blend freezes while paused (see the pause branch): hold the curve
     // and never finalize — finalize swaps roles and sets playing: true, which
     // force-resumed the next track after the user had paused.
@@ -493,7 +536,7 @@ function driveFade(): void {
     applyElementVolumes(Math.cos(theta), Math.sin(theta));
     if (p >= 1) {
       if (!state.playing) return;
-      finalizeFade();
+      completeTransition("blend-complete");
     }
   }, 25);
 }
@@ -505,44 +548,86 @@ function stopFadeTimer(): void {
   }
 }
 
-function finalizeFade(): void {
+/**
+ * The single, idempotent end of a transition.
+ *
+ * Both completion signals — the blend timer and the outgoing element's
+ * `ended` — land here, so whichever wins, the deck that is already playing
+ * the incoming track is the one that becomes the session player. Its media
+ * element is kept as-is: same src, same playback position, still running.
+ * Nothing is reloaded and `currentTime` is never rewritten.
+ */
+function completeTransition(reason: "blend-complete" | "outgoing-ended" | "incoming-ended"): void {
+  if (settling) return;
   const f = fade;
+  if (!f) return;
+  settling = true;
   fade = null;
   armed = null;
   stopFadeTimer();
-  if (!f) return;
-  const state = usePlayer.getState();
-  const ni = state.queue.findIndex((t) => t.id === f.toId);
-  if (ni < 0) return;
-  // Role swap FIRST: the standby element IS the session player now, and the
-  // outgoing main gets cleaned up only after it has been demoted.
-  const oldMain = el();
-  mainIdx = mainIdx === 0 ? 1 : 0;
-  loadedId = f.toId;
-  historyForId = f.toId;
   try {
-    oldMain.pause();
-    oldMain.removeAttribute("src");
-    oldMain.load();
-  } catch {
-    /* ignore */
+    const state = usePlayer.getState();
+    const ni = state.queue.findIndex((t) => t.id === f.toId);
+    if (ni < 0) {
+      // The incoming track left the queue mid-blend (it was removed, or the
+      // queue was truncated). Nothing owns that deck any more, so stop it —
+      // leaving it playing would put a track in the air that the UI has no
+      // record of — and hand the volume back to the outgoing one.
+      const orphan = standbyEl();
+      try {
+        orphan.pause();
+        orphan.removeAttribute("src");
+        orphan.load();
+      } catch {
+        /* ignore */
+      }
+      applyElementVolumes(1, 0);
+      return;
+    }
+    // Role swap FIRST: the standby element IS the session player now, and the
+    // outgoing main gets cleaned up only after it has been demoted.
+    const oldMain = el();
+    mainIdx = mainIdx === 0 ? 1 : 0;
+    loadedId = f.toId;
+    historyForId = f.toId;
+    try {
+      oldMain.pause();
+      oldMain.removeAttribute("src");
+      oldMain.load();
+    } catch {
+      /* ignore */
+    }
+    // The promoted deck's own clock is the authority for where this track is.
+    // Read it before touching the store, and clamp: a deck that ran out early
+    // can report a position at or past its duration, and a store position
+    // beyond the media duration is what makes a later seek jump.
+    const stand = el();
+    const raw = stand.currentTime;
+    const dur = Number.isFinite(stand.duration) ? stand.duration : Infinity;
+    const pos = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number.isFinite(dur) ? dur : Math.max(raw, 0)) : 0;
+    flushAccum("stop");
+    accum = { id: f.toId, playedMs: 0, pendingMs: 0, lastPos: pos };
+    emitPlayEvent("start", state.queue[ni], pos, 0, 0);
+    useLibrary.getState().pushHistory(state.queue[ni]);
+    advancingToId = f.toId;
+    usePlayer.setState({ index: ni, position: pos, playing: true, error: null });
+    advancingToId = null;
+    // Volumes after the index update: the loudness gain is keyed by the current
+    // track, and the engine-driven advance short-circuits the store subscription,
+    // so this is the one place the new main's gain gets applied. The last fade
+    // tick already left the elements at these levels — no jump.
+    applyElementVolumes(1, 0);
+    silenceAnalysing.delete(f.toId);
+    const t = silenceTrims.get(f.toId);
+    if (t && t.tail > 0) armSilenceTail(t.tail);
+  } finally {
+    settling = false;
+    transitionToken += 1;
   }
-  const stand = el();
-  flushAccum("stop");
-  accum = { id: f.toId, playedMs: 0, pendingMs: 0, lastPos: stand.currentTime };
-  emitPlayEvent("start", state.queue[ni], stand.currentTime, 0, 0);
-  useLibrary.getState().pushHistory(state.queue[ni]);
-  advancingToId = f.toId;
-  usePlayer.setState({ index: ni, position: stand.currentTime, playing: true, error: null });
-  advancingToId = null;
-  // Volumes after the index update: the loudness gain is keyed by the current
-  // track, and the engine-driven advance short-circuits the store subscription,
-  // so this is the one place the new main's gain gets applied. The last fade
-  // tick already left the elements at these levels — no jump.
-  applyElementVolumes(1, 0);
-  silenceAnalysing.delete(f.toId);
-  const t = silenceTrims.get(f.toId);
-  if (t && t.tail > 0) armSilenceTail(t.tail);
+  // A deck promoted after it already ran out would stall the queue: its
+  // `ended` fired while it was still the standby and nothing re-arms it. Hand
+  // straight to the normal end path so playback keeps moving.
+  if (reason === "incoming-ended") onTrackEnded();
 }
 
 function abortFade(keepRoles: boolean): void {
@@ -550,6 +635,9 @@ function abortFade(keepRoles: boolean): void {
   fade = null;
   armed = null;
   stopFadeTimer();
+  // Invalidate any arming still awaiting its start — its continuation must
+  // not wake up and start a deck for a track the user already moved past.
+  transitionToken += 1;
   if (!f || !elements) return;
   const oldStandby = standbyEl();
   try {
@@ -622,6 +710,11 @@ function armSilenceTail(tailSec: number): void {
     // A paused element holds its position inside the tail zone — advancing
     // then would start the next track while the user asked for silence.
     if (!usePlayer.getState().playing) return;
+    // A blend in flight owns the transition. Advancing here would land on the
+    // track already fading in, tear the standby deck down and restart it from
+    // zero — the same double-play the blend exists to prevent. The promoted
+    // track re-arms its own tail when the blend completes.
+    if (transitioning()) return;
     const cur = el();
     if (!Number.isFinite(cur.duration)) return;
     if (cur.currentTime >= cur.duration - tailSec - 0.05) {
@@ -757,6 +850,19 @@ export function initAudioEngine(): void {
         // Engine-driven advance: roles already swapped; nothing to load.
         return;
       }
+      // A jump to the track that is already fading in is not a new track — it
+      // is the transition being called early. `next()` from the outgoing
+      // track resolves to exactly that track, so the skip would otherwise
+      // tear down a deck the listener is already hearing and replay it from
+      // the top. Promote it instead: it becomes active once, where it is.
+      if (fade && cur && cur.id === fade.toId) {
+        completeTransition("outgoing-ended");
+        return;
+      }
+      // Anything else is the user (or a settings/queue change) steering to a
+      // different track. That is a deliberate cancellation, not a completion:
+      // tear the standby deck down so its half-heard track cannot go on
+      // playing alongside the new one.
       abortFade(false);
       stopPpRamp();
       flushAccum("stop");
@@ -853,6 +959,18 @@ function onTrackEnded(): void {
   // The user (or a fade) already chose the next track while this element was
   // finishing - its natural end must not advance the queue again.
   if (!current || loadedId !== current.id) return;
+  // A blend owns this transition: the next track is already PLAYING on the
+  // standby deck and its media clock is authoritative. This element reaching
+  // its natural end IS the transition completing, so promote that deck.
+  //
+  // Advancing the queue here instead re-entered the fresh-track path — it
+  // reloaded the very track the listener is already hearing, on the deck that
+  // had just been demoted, and restarted it at 0:00. That is the audible
+  // "Auto Mix plays the first seconds of the next song twice" bug.
+  if (fade && fade.fromId === current.id) {
+    completeTransition("outgoing-ended");
+    return;
+  }
   if (state.repeat === "one") {
     const a = el();
     a.currentTime = 0;
@@ -926,6 +1044,9 @@ export function engineBoot(): void {
 async function loadTrack(track: Track | null, autoplay: boolean): Promise<void> {
   if (!elements) return;
   disarmSilenceTail();
+  // A fresh load is a new playback session: any arming still waiting on a
+  // start belongs to the previous track and must not fire.
+  transitionToken += 1;
   if (!track) {
     loadedId = null;
     historyForId = null;
