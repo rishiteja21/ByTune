@@ -70,7 +70,55 @@ No localhost URLs, no stale GitHub Pages URLs, no old website domains remain in 
 
 During capture the running app was used as a real user: one track (Counting Stars — OneRepublic) was **liked**, one track was **downloaded** (a real `.m4a` now exists in the configured downloads folder), listening stats and the home feed updated, and the app was left in guest mode with playback **paused**. The app instance that was already running (dev-mode `electron.exe`) was left running and untouched otherwise. To restore: unlike the track and remove it from Downloads in-app.
 
-## Still needs manual action
+## Live verification & restructure pass (2026-09-29, after first push)
 
-1. **Commit & push** `README.md`, `CONTRIBUTING.md`, and `docs/screenshots/` — GitHub cannot render the new page until this lands on `main` (intentionally left uncommitted).
-2. Optional: set the repository social preview image (GitHub Settings → Social preview) — `docs/screenshots/home.png` is a good candidate.
+Commit `6fc266e` shipped the redesign. A second read/verify/fix pass followed:
+
+### Finding: why screenshots could appear not to render
+
+- All 10 screenshot files **were** present on `main` and their GitHub URLs returned `200 image/png` (checked every one via `github.com/rishiteja21/ByTune/raw/main/docs/screenshots/*.png`).
+- However, they were embedded as raw HTML `<img>` tags inside `<p align="center">` wrappers — the least robust rendering path across GitHub web views, mobile web and the GitHub mobile apps.
+- **Fix:** every image is now standard Markdown syntax `![alt](docs/screenshots/…)` — the most reliable path on all GitHub surfaces. Badges converted to Markdown `[![…](…)](…)` too.
+
+### Structure changes (product → visuals → features → install → technical)
+
+- Hero screenshot moved directly under the `# ByTune` heading, followed by the product description and Download/Website/Releases links.
+- New `## Screenshots` section with one `###` subsection per capability, in the requested order: The player · Fullscreen · Mini player · Lyrics · Search · Queue & playlists · Your library · Local music · Downloads · Settings.
+- `Development` merged under `Installation` as a subsection; Architecture slimmed to a layer diagram + link to the new **`docs/ARCHITECTURE.md`**, which now holds the deep implementation detail (BotGuard/PO-token minting, InnerTube client rotation, local stream proxy, Piped fallback, persistence, Auto Mix analysis, local-music scanning).
+- New screenshot `docs/screenshots/artist.png` (artist page with Top songs + player bar) captured from the running app for "The player" section — 11 real screenshots now referenced.
+
+### Factual-claims audit
+
+| Claim | Decision | Evidence |
+|---|---|---|
+| Streams from YouTube Music, no login required | Kept | Verified live in guest mode |
+| Word-synced lyrics, click-to-seek | Kept | Verified live (word-level highlight) |
+| Downloads as `.m4a`, configurable folder | Kept | Downloaded a track live |
+| "Lossless" download quality | Softened to "quality options up to the app's 'Lossless' setting" | The setting's UI label exists; actual codec/bitrate not independently verified |
+| "Almost every song has lyrics" | Removed quantifier → "LRCLIB fallback when they're missing" | Coverage not measurable |
+| "No ads, no telemetry walls" | Removed → "No subscriptions, no locked features, no dark patterns" | Telemetry/ads not independently auditable; avoids implying ad-free YouTube Music |
+| Windows media keys + SMTC overlay | Kept | `src/lib/audio.ts` MediaSession `setActionHandler` |
+| Beat-aware Auto Mix | Kept | `src/lib/analysis.ts` BPM/onset estimation ("powers beat-aligned …") |
+| Account/cloud backup | Kept | Settings: "keep your library safe even if this PC's app data is wiped" |
+| Canvas video clips | Kept as optional setting | `src/lib/canvas.ts` + SettingsView |
+| macOS | "Coming soon" kept | No macOS release exists |
+| Not affiliated with YouTube/Google | Kept verbatim | — |
+
+No legality claims were added; the "use responsibly and in accordance with the terms of the services it accesses" line stays in License. No claims about YouTube/InnerTube being "cleared" or approved anywhere.
+
+### Links & metadata re-verified
+
+- `https://bytune.vercel.app/` → 200
+- `https://github.com/rishiteja21/ByTune/releases/latest/download/ByTune-Setup.exe` → 200 (dynamic latest-asset URL)
+- Releases, Issues, LRCLIB, bgutil provider → 200
+- All 11 relative image paths exist in the working tree.
+- Repo description and topics unchanged from the first pass and still accurate.
+
+### Screenshot files used (11)
+
+`home.png` (hero) · `artist.png` · `fullscreen.png` · `miniplayer.png` · `lyrics.png` · `search.png` · `queue.png` · `library.png` · `local-music.png` · `downloads.png` · `settings.png` — all captured from the running application; none generated or mocked.
+
+### Still needs manual action
+
+1. Optional: set the repository social preview image (GitHub Settings → Social preview) — `docs/screenshots/home.png` is a good candidate.
+2. The "Lossless" download setting's actual output format/bitrate could be verified by inspecting a saved file if exactness matters.
