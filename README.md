@@ -1,6 +1,6 @@
 # ByTune
 
-![ByTune desktop music player main interface — home feed, library sidebar, now-playing panel and player bar](docs/screenshots/home.png)
+![ByTune desktop music player main interface — home feed with Jump back in, library sidebar, now-playing panel and player bar](docs/screenshots/home.png)
 
 **ByTune is an open-source desktop music player for Windows.** Stream from YouTube Music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native-feeling app.
 
@@ -45,7 +45,7 @@ Click the artwork in the player bar (or press <kbd>N</kbd>) for a cinematic view
 
 ### Mini player
 
-![ByTune mini player picture-in-picture mode with artwork and track info](docs/screenshots/miniplayer.png)
+![ByTune mini player picture-in-picture window floating over the desktop, playing Espresso by Sabrina Carpenter](docs/screenshots/miniplayer.jpg)
 
 The mini player is a real picture-in-picture window: always on top, resizable, with playback controls on hover. Work in something else and keep the music one glance away.
 
@@ -75,7 +75,7 @@ Your library persists on disk and restores on launch: liked songs, your own play
 
 ### Local music
 
-![ByTune local music library with imported songs, albums and artists](docs/screenshots/local-music.png)
+![ByTune local music library — an imported folder with its songs, albums and artists](docs/screenshots/local-music.png)
 
 Import folders from your PC and they sit beside your streaming library — full track lists, album and artist browsing, embedded artwork, and a filter that hides short recordings and voice notes.
 

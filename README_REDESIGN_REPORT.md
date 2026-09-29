@@ -122,3 +122,16 @@ No legality claims were added; the "use responsibly and in accordance with the t
 
 1. Optional: set the repository social preview image (GitHub Settings → Social preview) — `docs/screenshots/home.png` is a good candidate.
 2. The "Lossless" download setting's actual output format/bitrate could be verified by inspecting a saved file if exactness matters.
+
+### Screenshot swap pass (2026-09-29, third pass — repo owner's own captures)
+
+At the owner's request, three of my captured screenshots were replaced with the owner's own real app screenshots (2880px native, downscaled to 1920px for page weight):
+
+| Slot | Old file | New file | Source |
+|---|---|---|---|
+| Hero (under `# ByTune`) | `home.png` (my capture) | `home.png` — "Good night" home with Jump back in | Owner's screenshot |
+| Mini player section | `miniplayer.png` | `miniplayer.jpg` (519 KB, converted from 6.8 MB PNG — photographic desktop wallpaper) | Owner's screenshot: PiP window over the desktop |
+| Local music section | `local-music.png` (my "All songs" capture) | `local-music.png` — ENGLISH folder view | Owner's screenshot |
+
+- Old captures remain recoverable in git history; alt texts updated to match the new imagery.
+- Note: the owner-selected local-music screenshot visibly shows the imported folder path (`D:\Music\ENGLISH — Scanned Sep 28`); owner's choice, kept as provided.
