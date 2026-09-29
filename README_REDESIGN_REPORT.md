@@ -135,3 +135,4 @@ At the owner's request, three of my captured screenshots were replaced with the 
 
 - Old captures remain recoverable in git history; alt texts updated to match the new imagery.
 - Note: the owner-selected local-music screenshot visibly shows the imported folder path (`D:\Music\ENGLISH — Scanned Sep 28`); owner's choice, kept as provided.
+- Same-day follow-up: the mini player shot was replaced again with the owner's later capture (ByTune PiP over the owner's Batman desktop wallpaper, playing "Sailor Song" — Gigi Perez); 2 MB PNG → 146 KB JPEG at 1920px.

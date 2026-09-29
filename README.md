@@ -45,7 +45,7 @@ Click the artwork in the player bar (or press <kbd>N</kbd>) for a cinematic view
 
 ### Mini player
 
-![ByTune mini player picture-in-picture window floating over the desktop, playing Espresso by Sabrina Carpenter](docs/screenshots/miniplayer.jpg)
+![ByTune mini player picture-in-picture window floating over the desktop, playing Sailor Song by Gigi Perez](docs/screenshots/miniplayer.jpg)
 
 The mini player is a real picture-in-picture window: always on top, resizable, with playback controls on hover. Work in something else and keep the music one glance away.
 
