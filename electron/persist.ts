@@ -166,6 +166,7 @@ export async function resetAppData(): Promise<void> {
         "settings",
         "recent-searches",
         "listening-signals",
+        "listening-history",
         "artist-meta-cache",
         "account",
         "profile",

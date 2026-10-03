@@ -79,6 +79,15 @@ async function loadStats(force = false): Promise<StatsPair> {
   return statsInflight;
 }
 
+/**
+ * Drop the cached stats pair so the next read re-queries the main process.
+ * Called when the cloud restores the listening-history store — without this
+ * a restored Replay would stay hidden behind the up-to-60s-old cache.
+ */
+export function invalidateStatsCache(): void {
+  statsCache = null;
+}
+
 /** Subscribes to listening stats; refreshes on listening activity + a slow clock. */
 export function useStats(): StatsPair | null {
   const listenVersion = useListening((s) => s.version);
@@ -181,6 +190,13 @@ export interface TasteProfile {
 
 const DAY_MS = 86_400_000;
 
+/**
+ * Listening time credited for a history entry whose duration is unknown.
+ * History is a completed play; this is the length of a typical track, used
+ * only when the track itself carries no length.
+ */
+const ASSUMED_PLAY_MS = 210_000;
+
 export function maturityOf(totalPlays: number): Maturity {
   // Cold means "no listening signal at all" — a handful of plays is already
   // enough to personalize against, so the first session gets real recs.
@@ -236,6 +252,43 @@ export function computeTasteProfile(input: ComputeInput): TasteProfile {
     agg.msAll = a.ms;
     agg.playsAll = a.plays;
   }
+
+  // ---- library fallback: real behaviour that travels with the account ------
+  // Listening stats only exist on the device that recorded them, so a
+  // restored account (new machine, cleared app data, or any build older than
+  // stats sync) would read as cold and drop back to a generic feed even
+  // though its history and likes are right here. For every artist stats is
+  // silent about, the library's own plays and likes stand in. Per-artist
+  // fallback — never added on top of stats — so nothing is double counted.
+  const statsKnown = new Set<string>([...aggs.keys()]);
+  const fromLibrary = new Map<string, { name: string; plays: number; ms: number }>();
+  let libraryPlays = 0;
+  let libraryLikes = 0;
+  const creditFromLibrary = (track: Track, fromHistory: boolean): void => {
+    const key = lower(track.artist) || "unknown artist";
+    if (key === "unknown artist" || statsKnown.has(key)) return;
+    if (!fromHistory) {
+      libraryLikes += 1;
+      // A like scores through likedBoost below, but the artist must exist in
+      // the profile for that boost to be applied at all — even with no plays.
+      if (!fromLibrary.has(key) && !aggs.has(key)) aggFor(track.artist);
+      return; // a like is a preference, not a play
+    }
+    libraryPlays += 1;
+    const cur = fromLibrary.get(key) ?? { name: track.artist, plays: 0, ms: 0 };
+    cur.plays += 1;
+    // A history entry is a completed play; the track's own length is the best
+    // available stand-in for the listening time stats would have recorded.
+    cur.ms += track.duration > 0 ? track.duration * 1000 : ASSUMED_PLAY_MS;
+    fromLibrary.set(key, cur);
+  };
+  for (const t of history) creditFromLibrary(t, true);
+  for (const t of liked) creditFromLibrary(t, false);
+  for (const [key, credited] of fromLibrary) {
+    const agg = aggFor(credited.name);
+    agg.playsAll += credited.plays;
+    agg.msAll += credited.ms;
+  }
   // Artist recency: stats buckets don't timestamp artists, but their tracks
   // do — the freshest track counts as the artist's last visit.
   for (const t of [...month.tracks, ...all.tracks]) {
@@ -278,11 +331,24 @@ export function computeTasteProfile(input: ComputeInput): TasteProfile {
   }
 
   // ---- score ---------------------------------------------------------------
-  const maxMsMonth = Math.max(1, ...month.artists.map((a) => a.ms));
-  const maxMsAll = Math.max(1, ...all.artists.map((a) => a.ms));
+  // The maxima must consider library-credited artists too, otherwise a
+  // restored account's fallback listening time would dwarf every real number.
+  const maxMsMonth = Math.max(
+    1,
+    ...month.artists.map((a) => a.ms),
+    ...[...aggs.values()].map((a) => a.msMonth)
+  );
+  const maxMsAll = Math.max(
+    1,
+    ...all.artists.map((a) => a.ms),
+    ...[...aggs.values()].map((a) => a.msAll)
+  );
 
   const artists: ArtistSignal[] = [];
   for (const [key, agg] of aggs) {
+    // Untagged local files report "Unknown artist" — a real listening entry
+    // for Replay, but never an artist the feed can personalize around.
+    if (key === "unknown artist") continue;
     const engagement = agg.playsMonth + agg.playsAll + (likedByKey.get(key) ?? 0);
     if (engagement === 0) continue;
 
@@ -298,7 +364,10 @@ export function computeTasteProfile(input: ComputeInput): TasteProfile {
     const skipPenalty = Math.min(35, (skips[key]?.count ?? 0) * 9);
 
     const score = 60 * trend + 30 * longterm + likedBoost + searchBoost - skipPenalty;
-    if (score <= 0.5) continue;
+    // Engagement is the only gate: an absolute score floor would hide an
+    // artist with real plays whenever any other artist has a large listening
+    // total, which is exactly what a restored-but-small library looks like.
+    // Low scorers simply rank below the ones the listener actually lives in.
 
     const identity = idByKey.get(key);
     artists.push({
@@ -328,7 +397,9 @@ export function computeTasteProfile(input: ComputeInput): TasteProfile {
   const peakHour = Math.max(1, ...hours);
   const hourEnergy = hours[new Date().getHours()] / peakHour;
 
-  const totalPlays = all.plays;
+  // Maturity counts every real activity the account can prove, so a restored
+  // library is never mistaken for a brand-new listener.
+  const totalPlays = all.plays + libraryPlays + libraryLikes;
   const signature = [
     totalPlays,
     month.plays,

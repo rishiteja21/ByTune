@@ -237,7 +237,7 @@ export function ArtistView({ artistId }: { artistId: string }) {
       <div className="relative -mx-10 overflow-hidden">
         <div className="absolute inset-0">
           {artist.thumb ? (
-            <img src={upgradeArtwork(artist.thumb)} alt="" className="w-full h-full object-cover" />
+            <img src={upgradeArtwork(artist.thumb, 1200)} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full bg-ink-hi/[0.04]" />
           )}

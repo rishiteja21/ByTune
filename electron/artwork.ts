@@ -42,7 +42,7 @@ export function largestThumbUrl(thumbnails: unknown): string {
   return typeof url === "string" ? url : "";
 }
 
-export function upgradeThumb(url: string): string {
+export function upgradeThumb(url: string, target = 544): string {
   if (!url || typeof url !== "string") return "";
   let out = url.trim();
   if (!out) return "";
@@ -61,14 +61,14 @@ export function upgradeThumb(url: string): string {
       `${pre}${/^(default|mqdefault)$/i.test(name) ? "hqdefault" : name.toLowerCase()}.jpg`
   );
 
-  // yt3 artist avatars: =s60 / =s192 … → =s1200 (original).
-  out = out.replace(/=s\d+/g, "=s1200");
+  // yt3 artist avatars: =s60 / =s192 … → target (dynamic resize host).
+  out = out.replace(/=s\d+/g, `=s${target}`);
 
-  // Square catalogue art: =w60-h60… / =w60-c-h60… → =w1200-h1200… (flags kept).
-  out = out.replace(/=w\d+(-c)?-h\d+/g, "=w1200$1-h1200");
+  // Square catalogue art: =w60-h60… / =w60-c-h60… → target square (flags kept).
+  out = out.replace(/=w\d+(-c)?-h\d+/g, `=w${target}$1-h${target}`);
 
-  // Path-style /w60-h60…/ → /w1200-h1200…/ (suffix flags kept).
-  out = out.replace(/\/w\d+(-c)?-h\d+((?:-[a-z0-9]+)*)\//gi, "/w1200$1-h1200$2/");
+  // Path-style /w60-h60…/ → /w{target}-h{target}…/ (suffix flags kept).
+  out = out.replace(/\/w\d+(-c)?-h\d+((?:-[a-z0-9]+)*)\//gi, `/w${target}$1-h${target}$2/`);
 
   // Legacy default.jpg → hqdefault.jpg (never mqdefault — that is a downgrade).
   out = out.replace(/\/default\.jpg(?:\?.*)?$/i, "/hqdefault.jpg");
@@ -76,7 +76,7 @@ export function upgradeThumb(url: string): string {
   return out;
 }
 
-/** Pick the largest offered rendition, at original quality. */
-export function bestThumbUrl(thumbnails: unknown): string {
-  return upgradeThumb(largestThumbUrl(thumbnails));
+/** Pick the largest offered rendition, resized to `target` square. */
+export function bestThumbUrl(thumbnails: unknown, target = 544): string {
+  return upgradeThumb(largestThumbUrl(thumbnails), target);
 }

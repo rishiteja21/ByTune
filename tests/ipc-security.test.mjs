@@ -28,6 +28,7 @@ async function harness({ legacyStores = false } = {}) {
       if (name === "./pip") return { registerPipIpc() {}, isTrustedSender: e => e?.trusted === true };
       if (name === "./downloads") return { addDownloadListener() {}, defaultDownloadDir: async () => path.join(root, "downloads"), exportDownloadDir: () => path.join(root, "exports") };
       if (name === "./sync") return { noteLocalWrite() {} };
+      if (name === "./stats") return { onStoreWrite() {}, HISTORY_STORE: "listening-history" };
       if (name === "./local-library") return {
         addLibraryFolders: (paths) => { calls.push(["addFolders", ...paths]); return Promise.resolve({ added: [], lib: { folders: [] } }); },
       };

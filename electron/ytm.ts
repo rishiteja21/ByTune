@@ -86,7 +86,7 @@ function firstRunText(node: any): string | null {
 }
 
 /** Depth-first collection of a named renderer, preserving document order. */
-function collectRenderers(root: any, name: string): any[] {
+export function collectRenderers(root: any, name: string): any[] {
   const out: any[] = [];
   const visit = (node: any): void => {
     if (node == null || typeof node !== "object") return;
@@ -100,6 +100,113 @@ function collectRenderers(root: any, name: string): any[] {
     }
   };
   visit(root);
+  return out;
+}
+
+/**
+ * YTM Charts page (browseId FEmusic_charts) → home shelves. The region comes
+ * from the session's `gl` — this is the provider's own per-market popularity
+ * ranking ("Top songs", "Top artists", …), not a hand-built list. Song rows
+ * are responsive list items (both carousel shelves and the page's main
+ * musicShelf); artist rows are two-row cards; video uploads are excluded
+ * under the same music-only rule the home shelves apply (a video breaks
+ * playback sync). Shelves with fewer than 3 usable rows are dropped.
+ */
+export function parseChartsShelves(res: any): Array<{
+  title: string;
+  items: Array<
+    | { kind: "artist"; artist: { id: string; name: string; thumb: string; subtitle?: string } }
+    | { kind: "album"; album: { id: string; title: string; artist: string; thumb: string } }
+    | { kind: "track"; track: Track }
+  >;
+}> {
+  const out: Array<any> = [];
+  const harvest = (title: string, rows: any[]): void => {
+    const items: any[] = [];
+    for (const renderer of rows) {
+      const card = parseBrowseItem(renderer);
+      if (card) {
+        if (card.type === "artist") {
+          items.push({
+            kind: "artist",
+            artist: { id: card.browseId, name: card.title, thumb: card.thumb, subtitle: card.subtitle },
+          });
+        } else if (card.type === "album") {
+          items.push({
+            kind: "album",
+            album: {
+              id: card.browseId,
+              title: card.title,
+              artist: card.subtitle.split(" • ")[1]?.trim() || "Unknown artist",
+              thumb: card.thumb,
+            },
+          });
+        }
+        if (items.length >= 24) break;
+        continue;
+      }
+      const song = parseResponsiveListItem(renderer);
+      if (song && !song.isVideo && song.id && song.title) {
+        // ParsedSong is Track-shaped (id/title/artist/duration/thumb) — the
+        // exact object the feed's track cards render and the player streams.
+        items.push({ kind: "track", track: song });
+      }
+      if (items.length >= 24) break;
+    }
+    if (items.length >= 3) out.push({ title: title.trim() || "Charts", items });
+  };
+
+  // Carousel shelves ("Top artists", "Video charts", …) carry their title in
+  // a basic header; the page's main song list is a musicShelfRenderer with
+  // its own header.
+  for (const shelf of collectRenderers(res, "musicCarouselShelfRenderer")) {
+    harvest(text(shelf?.header?.musicCarouselShelfBasicHeaderRenderer?.title) || "Charts",
+      (Array.isArray(shelf?.contents) ? shelf.contents : [])
+        .map((node: any) => node?.musicResponsiveListItemRenderer ?? node?.musicTwoRowItemRenderer)
+        .filter(Boolean));
+  }
+  for (const shelf of collectRenderers(res, "musicShelfRenderer")) {
+    harvest(text(shelf?.title) || text(shelf?.header?.musicHeaderRenderer?.title) || "Charts",
+      (Array.isArray(shelf?.contents) ? shelf.contents : [])
+        .map((node: any) => node?.musicResponsiveListItemRenderer)
+        .filter(Boolean));
+  }
+  return out.slice(0, 4);
+}
+
+/**
+ * YTM Explore page (browseId FEmusic_explore) → the provider's own per-region
+ * moods & genres catalog ("Chill", "Workout", "Bollywood", "Country &
+ * Americana", …). The list follows the session's `gl`, so each market gets
+ * its own suggestions — real provider data, never a hardcoded list. Every
+ * entry carries its mood-page endpoint (browseId + params) for deep linking
+ * and the accent color the provider assigns (ARGB int → #RRGGBB).
+ */
+export interface ParsedMood {
+  title: string;
+  browseId: string;
+  params: string | null;
+  /** provider accent color (#RRGGBB), or null when the button carries none */
+  color: string | null;
+}
+
+export function parseMoods(res: any): ParsedMood[] {
+  const out: ParsedMood[] = [];
+  const seen = new Set<string>();
+  for (const button of collectRenderers(res, "musicNavigationButtonRenderer")) {
+    const title = text(button?.buttonText);
+    const endpoint = o(o(button, "clickCommand"), "browseEndpoint");
+    const browseId = s(endpoint, "browseId");
+    if (!title.trim() || !browseId || seen.has(title)) continue;
+    seen.add(title);
+    // leftStripeColor is an ARGB int (e.g. 4294951424 → #FFC200).
+    const argb = button?.solid?.leftStripeColor;
+    let color: string | null = null;
+    if (typeof argb === "number" && Number.isFinite(argb) && argb >= 0) {
+      color = "#" + (argb & 0xffffff).toString(16).padStart(6, "0");
+    }
+    out.push({ title: title.trim(), browseId, params: s(endpoint, "params"), color });
+  }
   return out;
 }
 

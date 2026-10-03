@@ -9,6 +9,7 @@ import { useLibrary } from "../stores/library";
 import { useSettings } from "../stores/settings";
 import { useRecents } from "../stores/recents";
 import { useListening } from "../stores/listening";
+import { invalidateStatsCache } from "./recs/profile";
 import { hasBridge } from "./bridge";
 
 const STORE_PERSIST: Record<string, { rehydrate: () => void | Promise<void> }> = {
@@ -23,6 +24,9 @@ let appliedSeq = 0;
 function apply(stores: string[], seq: number): void {
   if (seq <= appliedSeq) return;
   appliedSeq = seq;
+  // listening-history is a main-process store (no renderer hydration); the
+  // Replay summary read from it just needs its cache dropped.
+  if (stores.includes("listening-history")) invalidateStatsCache();
   for (const name of stores) {
     void STORE_PERSIST[name]?.rehydrate();
   }

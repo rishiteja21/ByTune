@@ -38,6 +38,12 @@ const api = {
   getPlaylist: (id: string) => ipcRenderer.invoke("music:playlist", id),
   getPlaylistPage: (id: string) => ipcRenderer.invoke("music:playlistPage", id),
   getHome: () => ipcRenderer.invoke("music:home"),
+  /** YTM Charts for the device market (regional popularity — cold-start feed). */
+  getCharts: () => ipcRenderer.invoke("music:charts"),
+  /** Per-market moods & genres from the provider's Explore page. */
+  getMoods: () => ipcRenderer.invoke("music:moods"),
+  /** The resolved device market + the signal it came from (diagnostics). */
+  marketInfo: () => ipcRenderer.invoke("market:current"),
   getLyrics: (track: { id: string; title: string; artist: string; album?: string; duration?: number }) =>
     ipcRenderer.invoke("music:lyrics", track),
   enrichDurations: (ids: string[]) => ipcRenderer.invoke("music:enrich", ids),

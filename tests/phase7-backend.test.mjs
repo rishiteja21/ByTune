@@ -21,7 +21,7 @@ const row = (store_name, payload) => ({ store_name, payload, updated_at: "2026-0
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bytune-phase7-"));
   const handlers = new Map(), modules = new Map(), events = [], calls = [], uploads = [];
-  let rows = [], user = "A", expired = false, authChanged, failUpload, failWrite;
+  let rows = [], user = "A", expired = false, authChanged, failUpload, failWrite, statsNotify = () => {};
   const sdk = {
     auth: {
       onAuthStateChange(fn) { authChanged = fn; },
@@ -82,7 +82,7 @@ function fixture() {
         if (isMain && name.startsWith("./") && !["./persist", "./supabase", "./sync", "./data-transition"].includes(name)) {
           if (name === "./downloads") return { addDownloadListener() {}, resetDownloads: async () => {}, defaultDownloadDir: async () => path.join(dir, "downloads"), exportDownloadDir: () => path.join(dir, "exports") };
           if (name === "./local-library") return { resetLocalLibrary: async () => {}, readLocalLibrary: () => ({ folders: [] }) };
-          if (name === "./stats") return { resetStats() {}, initStats() {}, flushSync() {}, recordListening() {}, summary: () => ({ totalMs: 0 }) };
+          if (name === "./stats") return { resetStats() {}, initStats() {}, flushSync() {}, reloadStore() {}, recordListening() {}, summary: () => ({ totalMs: 0 }), HISTORY_STORE: "listening-history", onStoreWrite(fn) { statsNotify = fn; } };
           if (name === "./pip") return { registerPipIpc() {}, isTrustedSender: () => true };
           return {};
         }
@@ -103,6 +103,7 @@ function fixture() {
   return {
     dir, disk, auth, sync, transition, events, calls, uploads,
     invoke: (name, ...args) => handlers.get(name)({}, ...args),
+    statsNotify: () => statsNotify?.(),
     rows(value) { rows = value; },
     user(value) { user = value; },
     expired(value) { expired = value; },
@@ -112,32 +113,73 @@ function fixture() {
   };
 }
 
-for (const method of ["auth:signIn", "auth:signUp"]) {
-  test(`guest upgrade via clearGuestProfile preserves and uploads data through ${method}`, async () => {
-    const h = fixture();
-    try {
-      await h.invoke("auth:continueGuest");
-      const doc = await h.invoke("data:scope");
-      const guest = library("guest");
-      guest.state.playlists = [{ id: "p", name: "Guest playlist", createdAt: 1, tracks: [track("guest")] }];
-      await h.invoke("data:write", "library", guest, doc);
-      await h.invoke("data:write", "recent-searches", envelope({ searches: ["guest query"] }), doc);
-      assert.equal(h.calls.length, 0, "guest writes are local-only");
-      await h.invoke("auth:clearGuestProfile");
-      assert.equal(h.auth.readProfile(), null);
-      h.rows([row("library", library("remote"))]);
-      await h.invoke(method, "alice", "valid-password-123");
-      assert.equal(h.transition.currentOwner(), "A");
-      assert.deepEqual(new Set(h.disk.readData("library").state.liked.map(t => t.id)), new Set(["guest", "remote"]));
-      assert.equal(h.disk.readData("library").state.playlists[0].id, "p");
-      assert.deepEqual(plain(h.disk.readData("recent-searches").state.searches), ["guest query"]);
-      const uploaded = h.uploads.find(v => v.store_name === "library");
-      assert.deepEqual(new Set(uploaded.payload.state.liked.map(t => t.id)), new Set(["guest", "remote"]));
-      assert.equal(uploaded.user_id, "A");
-      assert.ok(h.uploads.some(v => v.store_name === "recent-searches"));
-    } finally { await h.close(); }
-  });
-}
+test("guest data migrates into an account CREATED by sign-up", async () => {
+  const h = fixture();
+  try {
+    await h.invoke("auth:continueGuest");
+    const doc = await h.invoke("data:scope");
+    const guest = library("guest");
+    guest.state.playlists = [{ id: "p", name: "Guest playlist", createdAt: 1, tracks: [track("guest")] }];
+    await h.invoke("data:write", "library", guest, doc);
+    await h.invoke("data:write", "recent-searches", envelope({ searches: ["guest query"] }), doc);
+    assert.equal(h.calls.length, 0, "guest writes are local-only");
+    h.rows([row("library", library("remote"))]);
+    await h.invoke("auth:signUp", "alice", "valid-password-123");
+    assert.equal(h.transition.currentOwner(), "A");
+    assert.deepEqual(new Set(h.disk.readData("library").state.liked.map(t => t.id)), new Set(["guest", "remote"]));
+    assert.equal(h.disk.readData("library").state.playlists[0].id, "p");
+    assert.deepEqual(plain(h.disk.readData("recent-searches").state.searches), ["guest query"]);
+    const uploaded = h.uploads.find(v => v.store_name === "library");
+    assert.deepEqual(new Set(uploaded.payload.state.liked.map(t => t.id)), new Set(["guest", "remote"]));
+    assert.equal(uploaded.user_id, "A");
+    assert.ok(h.uploads.some(v => v.store_name === "recent-searches"));
+  } finally { await h.close(); }
+});
+
+test("signing into an EXISTING account restores that account's data, never the guest's", async () => {
+  const h = fixture();
+  try {
+    await h.invoke("auth:continueGuest");
+    const doc = await h.invoke("data:scope");
+    const guest = library("guest");
+    guest.state.playlists = [{ id: "p", name: "Guest playlist", createdAt: 1, tracks: [track("guest")] }];
+    await h.invoke("data:write", "library", guest, doc);
+    await h.invoke("data:write", "recent-searches", envelope({ searches: ["guest query"] }), doc);
+    h.rows([row("library", library("remote"))]);
+    await h.invoke("auth:signIn", "alice", "valid-password-123");
+    assert.equal(h.transition.currentOwner(), "A");
+    // The account's own cloud copy is what shows up — nothing of the guest's.
+    assert.deepEqual(new Set(h.disk.readData("library").state.liked.map(t => t.id)), new Set(["remote"]));
+    assert.deepEqual(plain(h.disk.readData("library").state.playlists.map(p => p.id)), []);
+    assert.equal(h.disk.readData("recent-searches"), null);
+    // And nothing of the guest's was ever uploaded under the account.
+    assert.ok(h.uploads.filter(v => v.user_id === "A").every(v => !JSON.stringify(v.payload).includes("guest")));
+    // Returning to guest still finds the guest's own data.
+    await h.invoke("auth:continueGuest");
+    assert.equal(h.transition.currentOwner(), "guest");
+    assert.deepEqual(new Set(h.disk.readData("library").state.liked.map(t => t.id)), new Set(["guest"]));
+    assert.equal(h.disk.readData("library").state.playlists[0].id, "p");
+    assert.deepEqual(plain(h.disk.readData("recent-searches").state.searches), ["guest query"]);
+  } finally { await h.close(); }
+});
+
+test("a failed sign-in leaves guest ownership and data untouched", async () => {
+  const h = fixture();
+  try {
+    await h.invoke("auth:continueGuest");
+    const doc = await h.invoke("data:scope");
+    await h.invoke("data:write", "library", library("guest"), doc);
+    await h.invoke("auth:clearGuestProfile");
+    h.rows([row("library", library("remote"))]);
+    await assert.rejects(h.invoke("auth:signIn", "alice", "wrong-password"), /Wrong username or password|Sign in failed/);
+    assert.equal(h.transition.currentOwner(), "guest");
+    assert.deepEqual(new Set(h.disk.readData("library").state.liked.map(t => t.id)), new Set(["guest"]));
+    // A retry that succeeds against the same (existing) account restores the
+    // account's copy; the guest's session is not mixed in.
+    await h.invoke("auth:signIn", "alice", "valid-password-123");
+    assert.deepEqual(new Set(plain(h.disk.readData("library").state.liked).map(t => t.id)), new Set(["remote"]));
+  } finally { await h.close(); }
+});
 
 test("logout and another login never migrate the previous account into the new one", async () => {
   const h = fixture();
@@ -156,33 +198,20 @@ test("logout and another login never migrate the previous account into the new o
   } finally { await h.close(); }
 });
 
-test("failed sign-in retains the guest upgrade intent for a retry", async () => {
-  const h = fixture();
-  try {
-    await h.invoke("auth:continueGuest");
-    const doc = await h.invoke("data:scope");
-    await h.invoke("data:write", "library", library("guest"), doc);
-    await h.invoke("auth:clearGuestProfile");
-    h.rows([]);
-    await assert.rejects(h.invoke("auth:signIn", "alice", "wrong-password"), /Wrong username or password|Sign in failed/);
-    assert.equal(h.transition.currentOwner(), "guest");
-    h.rows([row("library", library("remote"))]);
-    await h.invoke("auth:signIn", "alice", "valid-password-123");
-    assert.deepEqual(new Set(plain(h.disk.readData("library").state.liked).map(t => t.id)), new Set(["guest", "remote"]));
-  } finally { await h.close(); }
-});
-
 for (const clear of ["continueGuest", "signOut", "reset"]) {
-  test(`guest upgrade intent never leaks after ${clear}`, async () => {
+  test(`after ${clear}, an existing-account sign-in shows only the account's data`, async () => {
     const h = fixture();
     try {
       await h.invoke("auth:continueGuest");
+      const doc = await h.invoke("data:scope");
+      await h.invoke("data:write", "library", library("guest"), doc);
       await h.invoke("auth:clearGuestProfile");
       if (clear === "continueGuest") await h.invoke("auth:continueGuest");
       if (clear === "signOut") await h.invoke("auth:signOut");
       if (clear === "reset") await h.invoke("app:resetData");
+      h.rows([row("library", library("remote"))]);
       await h.invoke("auth:signIn", "alice", "password");
-      assert.equal(h.disk.readData("library")?.state?.liked?.length ?? 0, 0);
+      assert.deepEqual(new Set(h.disk.readData("library").state.liked.map(t => t.id)), new Set(["remote"]));
     } finally { await h.close(); }
   });
 }
@@ -237,14 +266,35 @@ for (const method of ["syncNow", "restoreNow"]) {
       assert.deepEqual(h.events, [{ stores: ["library"], seq: 1 }]);
     } finally { await h.close(); }
   });
-  test(`${method} rejects invalid rows without notification or store changes`, async () => {
+  test(`${method} skips an unusable row without notification or store changes`, async () => {
     const h = fixture();
     try {
       await signedIn(h);
       h.rows([row("library", null)]);
-      await assert.rejects(h.sync[method](), /Invalid cloud backup data/);
+      await h.sync[method]();
+      // The row was dropped, so nothing was written and nothing was announced.
       assert.deepEqual(h.events, []);
       assert.equal(h.disk.readData("library"), null);
+    } finally { await h.close(); }
+  });
+  test(`${method} still restores the sibling rows of a response holding an unusable one`, async () => {
+    const h = fixture();
+    try {
+      await signedIn(h);
+      h.rows([row("library", null), row("settings", envelope({ crossfadeSeconds: 4 }))]);
+      await h.sync[method]();
+      assert.deepEqual(h.events, [{ stores: ["settings"], seq: 1 }]);
+      assert.equal(h.disk.readData("library"), null);
+      assert.equal(h.disk.readData("settings").state.crossfadeSeconds, 4);
+    } finally { await h.close(); }
+  });
+  test(`${method} rejects a non-array cloud response outright`, async () => {
+    const h = fixture();
+    try {
+      await signedIn(h);
+      h.rows({ library: library("remote") });
+      await assert.rejects(h.sync[method](), /Invalid cloud backup data/);
+      assert.deepEqual(h.events, []);
     } finally { await h.close(); }
   });
 }
@@ -269,7 +319,7 @@ test("account-switch sync reports all cleared stores once, even after a later re
     h.rows([row("library", library("remote")), row("settings", envelope({ crossfadeSeconds: 4 }))]);
     h.failWrite("settings");
     await assert.rejects(h.sync.syncNow(), /disk failed/);
-    assert.deepEqual(h.events, [{ stores: ["library", "settings", "recent-searches", "listening-signals"], seq: 1 }]);
+    assert.deepEqual(h.events, [{ stores: ["library", "settings", "recent-searches", "listening-signals", "listening-history", "artist-meta-cache"], seq: 1 }]);
     assert.equal(h.disk.readData("library").state.liked[0].id, "remote");
   } finally { await h.close(); }
 });
@@ -308,5 +358,45 @@ test("manual restore with verified identity restores and retains device fields",
     assert.equal(h.disk.readData("library").state.liked[0].id, "remote");
     assert.deepEqual(plain(h.disk.readData("library").state.downloads), { local: "audio.mp3" });
     assert.deepEqual(h.events, [{ stores: ["library"], seq: 1 }]);
+  } finally { await h.close(); }
+});
+
+test("Replay keeps uploading as listening accumulates, not just once", async () => {
+  const h = fixture();
+  try {
+    // A stale cloud row must exist, otherwise "local with no remote copy"
+    // would push unconditionally and the test could not tell a real change
+    // notification from an accident of emptiness.
+    h.rows([row("listening-history", { state: { buckets: [] }, version: 1 })]);
+    await h.invoke("auth:signIn", "alice", "password");
+    const replayStore = (ms) => ({
+      state: { buckets: [{ month: "2026-10", tracks: { t: { title: "T", artist: "A", thumb: "", ms, plays: 1, lastAt: 1 } }, artists: {}, albums: {}, hours: new Array(24).fill(0), days: {} }] },
+      version: 1,
+    });
+    const uploadsOf = () => h.uploads.filter((v) => v.store_name === "listening-history");
+    const freshUploads = () => uploadsOf().filter((v) => v.payload.state.buckets[0]?.tracks.t?.ms >= 60_000);
+
+    // The user listens; the stats module flushes the store and reports it.
+    await h.disk.writeData("listening-history", replayStore(60_000));
+    h.statsNotify();
+    await h.sync.syncNow();
+    assert.equal(freshUploads().length, 1, "first listening session uploads");
+
+    // More listening later: a second flush must reach the cloud too — this is
+    // the property that was missing when Replay lived outside the write path.
+    await h.disk.writeData("listening-history", replayStore(120_000));
+    h.statsNotify();
+    await h.sync.syncNow();
+    assert.equal(freshUploads().length, 2, "later listening uploads again");
+    const last = uploadsOf().at(-1).payload.state.buckets[0].tracks.t.ms;
+    assert.equal(last, 120_000, "the uploaded copy is the fresh one");
+
+    // A guest's Replay never uploads.
+    await h.invoke("auth:signOut");
+    const before = uploadsOf().length;
+    await h.disk.writeData("listening-history", replayStore(240_000));
+    h.statsNotify();
+    await h.sync.syncNow();
+    assert.equal(uploadsOf().length, before, "guest Replay stays local");
   } finally { await h.close(); }
 });

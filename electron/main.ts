@@ -215,6 +215,9 @@ function registerIpc(): void {
   ipc.handle("music:playlist", (_e, id: string) => music.getPlaylist(id));
   ipc.handle("music:playlistPage", (_e, id: string) => music.getPlaylistPage(String(id ?? "")));
   ipc.handle("music:home", () => music.getHome());
+  ipc.handle("music:charts", () => music.getCharts());
+  ipc.handle("music:moods", () => music.getMoods());
+  ipc.handle("market:current", () => music.currentMarket());
   ipc.handle("music:lyrics", (_e, meta: music.LyricsMeta) => music.getLyrics(meta));
   ipc.handle("music:enrich", (_e, ids: string[]) => music.enrichDurations(Array.isArray(ids) ? ids : []));
   ipc.handle("music:stream", async (_e, id: string, forceRotate?: boolean, quality?: string) => {
@@ -335,7 +338,6 @@ function registerIpc(): void {
   ipc.handle("app:resetData", () => transition.serializeData(async () => {
     dataResetActive = true;
     try {
-      guestUpgradeIntent = false;
       transition.invalidateResetDocuments();
       sync.resetSyncState();
       await auth.signOut();
@@ -403,23 +405,28 @@ function registerIpc(): void {
   };
   ipc.handle("auth:getSession", () => auth.sessionInfo());
   // ---- Accounts (Supabase) + cloud backup ----
-  // One-shot in-memory "guest wants to upgrade" flag: set only by the
-  // clearGuestProfile handler when a real guest marker existed, consumed by
-  // the next sign-in's migration decision, cleared on reset/sign-out/guest
-  // continuation, and retained across a failed sign-in so a retry migrates.
-  let guestUpgradeIntent = false;
+  /**
+   * Sign in / sign up / Google sign-in share this path. Guest data migrates
+   * ONLY into an account being created here (`isNewAccount`) — signing into an
+   * account that already exists must bring that account's own cloud copy
+   * forward, never mix the previous guest session's listens, likes and feed
+   * into it. `changeOwner` archives whatever the guest did under the guest
+   * slot, so a later "continue as guest" finds it again.
+   */
   const signIn = (authenticate: () => Promise<auth.SessionInfo>) => transition.serializeData(async () => {
     await persist.drainWrites();
     const previous = transition.currentOwner();
-    const migrateGuest = previous === "guest" && (guestUpgradeIntent || auth.readProfile()?.mode === "guest");
-    const info = await authenticate().catch((err) => {
-      // A failed sign-in must keep the intent so an immediate retry migrates.
-      return Promise.reject(err);
-    });
-    guestUpgradeIntent = false;
+    const info = await authenticate();
+    const migrateGuest = previous === "guest" && info.isNewAccount === true;
     await transition.changeOwner(info.userId ?? "guest", migrateGuest);
-    if (previous !== info.userId) sync.resetSyncState(info.userId ?? undefined);
-    await sync.syncNowExclusive().catch((err) => console.warn("[bytune] login restore pending:", err));
+    if (previous !== info.userId) {
+      sync.resetSyncState(info.userId ?? undefined);
+      stats.reloadStore();
+    }
+    await sync.syncNowExclusive().catch((err) => {
+      console.error("[bytune] login sync failed (account data not pulled):", err instanceof Error ? err.message : err);
+      sync.noteSyncFailure(err);
+    });
     mainWindow?.webContents.reload();
     return info;
   });
@@ -427,18 +434,14 @@ function registerIpc(): void {
   ipc.handle("auth:signIn", (_e, username: string, password: string) => signIn(() => auth.signIn(username, password)));
   ipc.handle("auth:signInGoogle", () => signIn(() => auth.signInGoogle()));
   ipc.handle("auth:continueGuest", () => transition.serializeData(async () => {
-    guestUpgradeIntent = false;
     await transition.changeOwner("guest", false);
     sync.resetSyncState();
+    stats.reloadStore();
     const info = await auth.continueAsGuest();
     mainWindow?.webContents.reload();
     return info;
   }));
-  ipc.handle("auth:clearGuestProfile", async () => {
-    // Real guest marker only — never a post-logout marker with no guest data.
-    if (auth.readProfile()?.mode === "guest") guestUpgradeIntent = true;
-    await auth.clearGuestProfile();
-  });
+  ipc.handle("auth:clearGuestProfile", () => auth.clearGuestProfile());
   ipc.handle("auth:usernameAvailable", async (_e, username: string) => {
     const problem = auth.validateUsername(String(username ?? ""));
     if (problem) return { available: false, reason: problem };
@@ -456,16 +459,23 @@ function registerIpc(): void {
   ipc.handle("auth:setUsername", (_e, username: string) => auth.setUsername(username));
   ipc.handle("auth:skipUsername", () => auth.skipUsernameClaim());
   ipc.handle("auth:signOut", () => transition.serializeData(async () => {
-    guestUpgradeIntent = false;
     await persist.drainWrites();
-    await sync.syncNowExclusive().catch((err) => console.warn("[bytune] logout backup pending:", err));
+    await sync.syncNowExclusive().catch((err) => {
+      console.error("[bytune] logout backup failed:", err instanceof Error ? err.message : err);
+      sync.noteSyncFailure(err);
+    });
     const info = await auth.signOut();
     await transition.changeOwner("guest", false);
     sync.resetSyncState();
+    stats.reloadStore();
     mainWindow?.webContents.reload();
     return info;
   }));
   ipc.handle("sync:status", () => sync.syncStatus());
+  // Replay is a main-process store: its writes never pass through the
+  // renderer's data:write handler above, so the sync engine must be told
+  // here or Replay would upload once on sign-in and never again.
+  stats.onStoreWrite(() => sync.noteLocalWrite(stats.HISTORY_STORE));
   ipc.handle("sync:now", () => sync.syncNow());
   ipc.handle("sync:backupNow", () => sync.backupNow());
   ipc.handle("sync:restoreNow", () => sync.restoreNow());
@@ -540,7 +550,6 @@ if (!gotLock) {
     Menu.setApplicationMenu(null);
     persist.migrateLegacyData();
     transition.initializeOwner();
-    stats.initStats();
     pip.bindMainWindowGetter(() => mainWindow);
     auth.registerProtocol();
     auth.initInstallMarker();
@@ -621,6 +630,10 @@ if (!gotLock) {
     pendingOAuthUrl = undefined;
     stripMediaReferer();
     registerIpc();
+    // Replay lives behind registerIpc's write hook: initStats runs the
+    // one-time legacy recovery, and any months it recovers must be announced
+    // to the sync engine — which is only possible once that hook is wired.
+    stats.initStats();
     void startStreamProxy().catch((err) => console.warn("[bytune] stream proxy failed:", err));
     createWindow();
     app.on("activate", () => {

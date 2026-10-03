@@ -12,21 +12,26 @@
  * token, and finally fall back to public Piped mirrors.
  */
 import { Innertube } from "youtubei.js";
+import { app } from "electron";
 import { pickAudio } from "./audio-format";
 import { fetchLyrics } from "./lyrics";
 import { largestThumbUrl, upgradeThumb } from "./artwork";
 import { getPoToken, invalidatePoToken } from "./po-token";
+import { resolveMarket, type ResolvedMarket } from "./market";
 import {
   SEARCH_FILTER_PARAMS,
   callBrowse,
   callSearch,
   callSearchContinuation,
   parseArtistPage,
+  parseChartsShelves,
+  parseMoods,
   parseQueueCredits,
   parseRemotePlaylistPage,
   parseReleasePage,
   parseSearchPage,
 } from "./ytm";
+import type { MoodEntry } from "./moods";
 import type {
   Album,
   Artist,
@@ -65,6 +70,39 @@ const PIPED_INSTANCES = [
 let preferredClientIdx = 0;
 let ytPromise: Promise<any> | null = null;
 
+/* ------------------------------------------------------------------ */
+/* Market — the device's YTM region (InnerTube `gl`).                  */
+/* Resolved once per boot from OS signals, never from the auth method: */
+/* guest / password / OAuth sessions all get the same treatment.       */
+/* ------------------------------------------------------------------ */
+
+let marketValue: ResolvedMarket | null = null;
+
+function resolveDeviceMarket(): ResolvedMarket {
+  if (!marketValue) {
+    marketValue = resolveMarket({
+      osRegion: app.getLocaleCountryCode() || null,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+      override: process.env.BYTUNE_MARKET ?? null,
+      isDev: !app.isPackaged,
+    });
+    console.log(`[bytune] market: ${marketValue.country} (${marketValue.source})`);
+  }
+  return marketValue;
+}
+
+/** The resolved device market — for diagnostics and feed debugging. */
+export function currentMarket(): ResolvedMarket {
+  return resolveDeviceMarket();
+}
+
+/** The InnerTube display language (hl) — UI wording, never the region. */
+function displayLanguage(): string {
+  const locale = app.getLocale() || "en";
+  const base = locale.split("-")[0].toLowerCase();
+  return /^[a-z]{2,3}$/.test(base) ? base : "en";
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2, delayMs = 600): Promise<T> {
@@ -81,8 +119,17 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 2, delayMs = 600): 
 }
 
 async function createSession(): Promise<any> {
+  // The market rides into the session's client context (`gl`), which is what
+  // makes the home feed, charts and search results regional. Resolved before
+  // the bootstrap so visitor data and content context agree on the region.
+  const market = resolveDeviceMarket();
   // Phase 1: bootstrap session just to obtain visitor data.
-  const bootstrap = await Innertube.create({ retrieve_player: false, enable_session_cache: false });
+  const bootstrap = await Innertube.create({
+    retrieve_player: false,
+    enable_session_cache: false,
+    location: market.country,
+    lang: displayLanguage(),
+  });
   const visitorData: string | undefined = bootstrap?.session?.context?.client?.visitorData;
 
   // Phase 2: mint a PO token bound to that visitor data.
@@ -105,9 +152,15 @@ async function createSession(): Promise<any> {
     enable_session_cache: false,
     visitor_data: visitorData,
     po_token: poToken,
+    location: market.country,
+    lang: displayLanguage(),
   });
   (yt as any).__visitorData = visitorData;
   (yt as any).__poToken = poToken;
+  (yt as any).__market = market.country;
+  console.log(
+    `[bytune] innertube session: gl=${yt.session?.context?.client?.gl ?? "?"} hl=${yt.session?.context?.client?.hl ?? "?"}`
+  );
   return yt;
 }
 
@@ -595,9 +648,35 @@ export async function getHome(): Promise<HomeShelf[]> {
   return shelves.slice(0, 8);
 }
 
+/**
+ * YouTube Music's Charts page — the provider's own per-region popularity
+ * ranking. The region comes from the session's `gl` (the resolved device
+ * market), so this is REAL market data, not a hand-built list. Any failure
+ * throws — the feed composes without the shelf.
+ */
+export async function getCharts(): Promise<HomeShelf[]> {
+  const yt = await getYT();
+  const res = await withRetry(() => callBrowse(yt, "FEmusic_charts"));
+  return parseChartsShelves(res) as HomeShelf[];
+}
+
+/**
+ * The provider's per-region moods & genres catalog (Explore page). The list
+ * follows the session's `gl` — the resolved device market — so each market
+ * gets its own browse suggestions. Any failure throws; callers fall back.
+ */
+export async function getMoods(): Promise<MoodEntry[]> {
+  const yt = await getYT();
+  const res = await withRetry(() => callBrowse(yt, "FEmusic_explore"));
+  return parseMoods(res);
+}
+
 /* ------------------------------------------------------------------ */
-/* Lyrics: YT Music first, LRCLIB fallback for everything else         */
-/* Returns time-synced lines when the source has them.                 */
+/* Lyrics: BitChord mobile's provider sweep — word-synced Apple TTML   */
+/* (BiniLyrics/BetterLyrics/PaxSenix/LyricsPlus), QQ karaoke, Musix-   */
+/* match richsync, then line-synced KuGou/LRCLIB/Megalobiz, captions   */
+/* and plain text last. Returns time-synced lines when any source has  */
+/* them.                                                               */
 /* ------------------------------------------------------------------ */
 
 export interface LyricsMeta {
@@ -677,21 +756,125 @@ function stripSyncedTimestamps(synced: string): string {
     .trim();
 }
 
+/** Plain lyrics from YT Music's own Lyrics tab — ranked source and final fallback. */
+async function ytMusicPlain(videoId: string): Promise<string | null> {
+  try {
+    const yt = await getYT();
+    const ytl: any = await withRetry(() => (yt.music as any).getLyrics(videoId));
+    return ytl?.text && ytl.text.trim() ? ytl.text : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectByName(node: unknown, key: string, out: any[] = []): any[] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    for (const item of node) collectByName(item, key, out);
+    return out;
+  }
+  const obj = node as Record<string, unknown>;
+  const value = obj[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) out.push(value);
+  for (const item of Object.values(obj)) collectByName(item, key, out);
+  return out;
+}
+
+function runsText(node: any): string {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  if (typeof node.simpleText === "string") return node.simpleText;
+  if (Array.isArray(node.runs)) return node.runs.map((r: any) => (typeof r?.text === "string" ? r.text : "")).join("");
+  return "";
+}
+
+function msToSeconds(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" ? parseInt(value, 10) : NaN;
+  return Number.isFinite(n) ? n / 1000 : null;
+}
+
+/** Caption lines that say nothing about the song. */
+const CAPTION_NOISE = /^(\[(music|applause|laughter|cheering|instrumental)\]|[♪♫\s]*)$/i;
+
+/**
+ * Timed captions for the exact playing video — innertube's get_transcript,
+ * keyed on the engagement-panel continuation the video's own `next` response
+ * carries. YouTube has been hardening this endpoint (it now demands a
+ * session-bound precondition innertube clients are still catching up with),
+ * so the first refusal parks the source for the session rather than paying
+ * two dead requests per track; a session where YouTube answers again picks it
+ * back up on its own.
+ */
+let transcriptRefused = false;
+
+async function fetchYouTubeTranscriptCues(videoId: string): Promise<SyncedLyricLine[] | null> {
+  if (transcriptRefused || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  try {
+    const yt = await getYT();
+    const next: any = await withRetry(() => yt.actions.execute("next", { videoId }));
+    const data = next?.data ?? next;
+    if (!data) return null;
+    let params: string | null = null;
+    const walk = (node: unknown): void => {
+      if (params || !node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item);
+        return;
+      }
+      const obj = node as Record<string, any>;
+      const endpointParams = obj?.getTranscriptEndpoint?.params;
+      if (typeof endpointParams === "string" && endpointParams) {
+        params = endpointParams;
+        return;
+      }
+      for (const value of Object.values(obj)) walk(value);
+    };
+    walk(data);
+    if (!params) return null; // video carries no transcript panel at all
+    const res: any = await yt.actions.execute("/get_transcript", { params });
+    const body = res?.data ?? res;
+    if (!body) {
+      transcriptRefused = true;
+      return null;
+    }
+    let lines: SyncedLyricLine[] = [];
+    const segments = collectByName(body, "transcriptSegmentRenderer");
+    if (segments.length) {
+      for (const seg of segments) {
+        const time = msToSeconds(seg.startMs);
+        if (time == null) continue;
+        const text = runsText(seg.snippet).replace(/[♪♫]/g, "").trim();
+        if (!text || CAPTION_NOISE.test(text)) continue;
+        const end = msToSeconds(seg.endMs);
+        lines.push({ time, text, end: end != null && end > time ? end : undefined });
+      }
+    } else {
+      for (const cue of collectByName(body, "transcriptCueRenderer")) {
+        const time = msToSeconds(cue.startOffsetMs);
+        if (time == null) continue;
+        const text = runsText(cue.cue).replace(/[♪♫]/g, "").trim();
+        if (!text || CAPTION_NOISE.test(text)) continue;
+        lines.push({ time, text });
+      }
+    }
+    if (!lines.length) {
+      // A 200 that names neither renderer shape means the endpoint moved on —
+      // same refusal, park it.
+      transcriptRefused = true;
+      return null;
+    }
+    lines = lines.filter((l) => Number.isFinite(l.time)).sort((a, b) => a.time - b.time);
+    return lines.length ? lines : null;
+  } catch {
+    transcriptRefused = true;
+    return null;
+  }
+}
+
 /** Parse LRC-format synced lyrics into (time, text) lines. */
 export async function getLyrics(meta: LyricsMeta): Promise<LyricsResult | null> {
   if (!meta?.id) return null;
 
-  // The YT plain text is the fallback of last resort, fetched lazily only if
-  // every synced provider misses — a network call saved in the common case.
-  const ytPlainFallback = async (): Promise<string | null> => {
-    try {
-      const yt = await getYT();
-      const ytl: any = await withRetry(() => (yt.music as any).getLyrics(meta.id));
-      return ytl?.text && ytl.text.trim() ? ytl.text : null;
-    } catch {
-      return null;
-    }
-  };
   // A cached answer that only LINE-synced is retried after 10 minutes: the
   // word-synced providers are rate-limited flakier than KuGou/LRCLIB, and a
   // mediocre answer should never stick for the whole session.
@@ -714,7 +897,9 @@ export async function getLyrics(meta: LyricsMeta): Promise<LyricsResult | null> 
   // mobile player is served for the same track.
   let artist = (meta.artist ?? "").trim();
   let album = meta.album;
-  let duration = meta.duration ?? 0;
+  // A NaN duration serializes to JSON `null`, which the cloud validator (and
+  // any consumer) reads back as a broken track — never let one through.
+  let duration = typeof meta.duration === "number" && Number.isFinite(meta.duration) ? Math.round(meta.duration) : 0;
   if (!artist || PLACEHOLDER_ARTISTS.has(artist.toLowerCase())) {
     const credits = await resolveQueueCredits(meta.id);
     if (credits) {
@@ -733,7 +918,7 @@ export async function getLyrics(meta: LyricsMeta): Promise<LyricsResult | null> 
       duration,
     },
     { prioritizeWordSync: true },
-    ytPlainFallback
+    { ytMusicPlain, ytTranscript: fetchYouTubeTranscriptCues }
   );
   const result: LyricsResult | null = found
     ? { synced: found.synced, plain: found.plain, source: found.source, wordSynced: found.wordSynced }

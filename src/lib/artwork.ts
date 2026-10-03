@@ -1,10 +1,13 @@
 /**
- * Cover quality safety net — mirrors `electron/artwork.ts`.
+ * Cover quality with a size budget — mirrors `electron/artwork.ts`.
  *
- * Fresh data already arrives at original quality from the main process, but
- * libraries, histories and queues persisted earlier still hold small
- * placeholder URLs (`=w60-h60`, `=s60`, cropped `hqdefault.jpg?sqp=…`). Every
- * displayed cover passes through `upgradeArtwork` so those heal on sight.
+ * Cover URLs carry dynamic resize parameters, so the same photo ID serves any
+ * square size. `upgradeArtwork` normalizes every URL to `target` square
+ * (default 544 — 2-3× the largest card/circle size, plenty for retina) so
+ * lists never pull megabyte-sized originals; surfaces that display big (full-
+ * bleed heroes, the Now Playing cover) pass a larger target. Libraries,
+ * histories and queues persisted earlier still hold small placeholder URLs
+ * (`=w60-h60`, `=s60`, cropped `hqdefault.jpg?sqp=…`) — those heal on sight.
  */
 
 /**
@@ -18,7 +21,7 @@ export function artworkUrlOk(url: string): boolean {
   return /^(https?:\/\/|data:image\/|blob:|localart:)/i.test(url);
 }
 
-export function upgradeArtwork(url: string | null | undefined): string {
+export function upgradeArtwork(url: string | null | undefined, target = 544): string {
   if (!url || typeof url !== "string") return "";
   let out = url.trim();
   if (!out || !artworkUrlOk(out)) return "";
@@ -32,11 +35,11 @@ export function upgradeArtwork(url: string | null | undefined): string {
       `${pre}${/^(default|mqdefault)$/i.test(name) ? "hqdefault" : name.toLowerCase()}.jpg`
   );
 
-  out = out.replace(/=s\d+/g, "=s1200");
+  out = out.replace(/=s\d+/g, `=s${target}`);
 
-  out = out.replace(/=w\d+(-c)?-h\d+/g, "=w1200$1-h1200");
+  out = out.replace(/=w\d+(-c)?-h\d+/g, `=w${target}$1-h${target}`);
 
-  out = out.replace(/\/w\d+(-c)?-h\d+((?:-[a-z0-9]+)*)\//gi, "/w1200$1-h1200$2/");
+  out = out.replace(/\/w\d+(-c)?-h\d+((?:-[a-z0-9]+)*)\//gi, `/w${target}$1-h${target}$2/`);
 
   out = out.replace(/\/default\.jpg(?:\?.*)?$/i, "/hqdefault.jpg");
 

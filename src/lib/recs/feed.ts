@@ -19,27 +19,112 @@ import { peekArtistMeta, resolveArtistMeta } from "../../stores/artistMeta";
 import { requireBridge } from "../../lib/bridge";
 import { useUI } from "../../stores/ui";
 import type { HomeShelf } from "../../types";
+import { FALLBACK_MOODS } from "../../../electron/moods";
 import { getArtistBundle, peekBundle, pruneBundles, type ArtistBundle } from "./candidates";
 import { useTasteProfile, type TasteProfile } from "./profile";
 import { buildHomeSections, type HomeSection } from "./sections";
 
 /* ------------------------------------------------------- youtube feed cache */
+/* Stale-while-revalidate: a manual refresh marks the caches stale and the
+   next rebuild refetches — but wave 0 keeps painting the LAST KNOWN shelves
+   and chips, so a refresh never flashes fallback content or an empty page.
+   The stale copy is also the failure fallback if the refetch fails. */
 
 const YT_TTL_MS = 3_600_000;
 let ytShelvesCache: { shelves: HomeShelf[]; at: number } | null = null;
+let ytShelvesStale = false;
+let chartsCache: { shelves: HomeShelf[]; at: number } | null = null;
+let chartsStale = false;
+
+function shelvesUsable(cache: { at: number } | null, stale: boolean): boolean {
+  return cache != null && (stale || Date.now() - cache.at < YT_TTL_MS);
+}
 
 async function loadYtShelves(): Promise<HomeShelf[] | null> {
-  if (ytShelvesCache && Date.now() - ytShelvesCache.at < YT_TTL_MS) return ytShelvesCache.shelves;
+  if (shelvesUsable(ytShelvesCache, ytShelvesStale)) return ytShelvesCache!.shelves;
   try {
     const shelves = await requireBridge().getHome();
     if (shelves && shelves.length > 0) {
       ytShelvesCache = { shelves, at: Date.now() };
+      ytShelvesStale = false;
       return shelves;
     }
   } catch {
     /* offline / no bridge — fall back to whatever we kept */
   }
   return ytShelvesCache?.shelves ?? null;
+}
+
+/**
+ * YTM Charts for the device market — the provider's own regional popularity
+ * ranking. The region lives in the InnerTube session's `gl`, resolved from
+ * the device (OS region → timezone → global default), never from the auth
+ * method; the personalized orchestration around it is unchanged.
+ */
+async function loadCharts(): Promise<HomeShelf[] | null> {
+  if (shelvesUsable(chartsCache, chartsStale)) return chartsCache!.shelves;
+  try {
+    const shelves = await requireBridge().getCharts();
+    if (shelves && shelves.length > 0) {
+      chartsCache = { shelves, at: Date.now() };
+      chartsStale = false;
+      return shelves;
+    }
+  } catch {
+    /* charts unavailable — the home feed composes without them */
+  }
+  return chartsCache?.shelves ?? null;
+}
+
+/**
+ * The market-aware cold-start/filler shelf set: regional charts first (the
+ * provider's own popularity ranking for this device's market), then
+ * YouTube's regional home feed (editorial mixes + discovery, which also
+ * carries the global content every market keeps). Either half may be
+ * missing — charts can fail, home can come back empty — but never both
+ * unless the provider itself is unreachable, in which case callers fall
+ * back to the personalized sections alone.
+ */
+async function loadMarketShelves(): Promise<HomeShelf[] | null> {
+  const [charts, home] = await Promise.all([loadCharts(), loadYtShelves()]);
+  if (!charts && !home) return null;
+  return [...(charts ?? []), ...(home ?? [])];
+}
+
+/** Last-known shelves for the instant wave-0 paint, stale or fresh. */
+function cachedMarketShelves(): HomeShelf[] | null {
+  const charts = chartsCache?.shelves ?? [];
+  const home = ytShelvesCache?.shelves ?? [];
+  if (!charts.length && !home.length) return null;
+  return [...charts, ...home];
+}
+
+/* -------------------------------------------------- moods & genres cache */
+
+const MOODS_TTL_MS = 24 * 3_600_000;
+let moodsCache: { titles: string[]; at: number } | null = null;
+
+/**
+ * The provider's per-market moods & genres (Explore page) — the cold-start
+ * Browse chips. The list follows the session's `gl` (the resolved device
+ * market), so each market gets its own suggestions. Cached for a day; a
+ * failure returns null and the section falls back to a neutral global set.
+ */
+async function loadMoodTitles(): Promise<string[] | null> {
+  if (moodsCache && Date.now() - moodsCache.at < MOODS_TTL_MS) return moodsCache.titles;
+  try {
+    const moods = (await requireBridge().getMoods()) as Array<{ title: string; browseId: string }>;
+    const titles = moods
+      .filter((m) => m.browseId.includes("moods_and_genres_category"))
+      .map((m) => m.title);
+    if (titles.length >= 6) {
+      moodsCache = { titles, at: Date.now() };
+      return titles;
+    }
+  } catch {
+    /* offline — the Browse section falls back to neutral global chips */
+  }
+  return moodsCache?.titles ?? null;
 }
 
 /* ------------------------------------------------------------- bundle scope */
@@ -97,24 +182,29 @@ async function orchestrate(profile: TasteProfile, apply: (sections: HomeSection[
 
   const feedThin = collectBundles(profile, [...seedIds, ...relatedIds]).size < 2;
   const wantYt = feedThin || profile.maturity === "cold" || profile.maturity === "light";
-  const ytShelves = wantYt ? await loadYtShelves() : null;
+  const marketShelves = wantYt ? await loadMarketShelves() : null;
   apply(
     buildHomeSections({
       profile,
       bundles: collectBundles(profile, [...seedIds, ...relatedIds]),
-      ytShelves,
+      ytShelves: marketShelves,
     })
   );
 }
 
 /* --------------------------------------------------------------------- hook */
 
-/** Manual refresh (TopBar button): drop the YouTube feed cache so it refetches,
- *  then bump the nonce — Home re-orchestrates, and profile.ts forces a stats
- *  reload through the same signal so plays recorded since the last poll land
- *  before the rebuild. */
+/** Manual refresh (TopBar button): mark the market shelves stale so the next
+ *  rebuild refetches charts and the regional feed, then bump the nonce —
+ *  profile.ts forces a stats reload through the same signal so plays recorded
+ *  since the last poll land before the rebuild. The stale copies still paint
+ *  instantly (stale-while-revalidate), so a refresh never flashes fallback
+ *  content or an empty page, and the resolved market is never reset: it is a
+ *  device property, not feed state. The moods catalog is static — it is not
+ *  part of a refresh at all. */
 export function reloadHomeFeed(): void {
-  ytShelvesCache = null;
+  ytShelvesStale = true;
+  chartsStale = true;
   useUI.getState().bumpHomeReload();
 }
 
@@ -135,15 +225,36 @@ export function useHomeFeed(): { sections: HomeSection[]; profile: TasteProfile 
       if (runSeq.current === seq) setSections(next);
     };
 
-    // Wave 0 — instant paint from stores + bundle cache. Never a blank Home.
-    apply(buildHomeSections({ profile, bundles: collectBundles(profile, null), ytShelves: null }));
+    // Wave 0 — instant paint from stores + bundle cache + the last-known
+    // market shelves/chips (stale-while-revalidate: a refresh repaints THIS,
+    // then swaps in fresh data when the refetch lands). Never a blank Home,
+    // never a fallback flash.
+    apply(
+      buildHomeSections({
+        profile,
+        bundles: collectBundles(profile, null),
+        ytShelves: cachedMarketShelves(),
+        moods: moodsCache?.titles ?? undefined,
+      })
+    );
 
-    // No listening signal at all — YouTube's own feed is the honest cold
-    // start. The moment any artist signal exists (a single play counts),
-    // the personalized orchestration below takes over.
+    // No listening signal at all — the market-aware cold start: regional
+    // charts + YouTube's regional feed + the market's own browse chips,
+    // composed with the (still empty) personalized sections. The moment any
+    // artist signal exists (a single play counts), the personalized
+    // orchestration below takes over and the market shelves become filler.
     if (profile.artists.length === 0) {
-      void loadYtShelves().then((shelves) => {
-        apply(buildHomeSections({ profile, bundles: collectBundles(profile, null), ytShelves: shelves }));
+      void Promise.all([loadMarketShelves(), loadMoodTitles()]).then(([shelves, moodTitles]) => {
+        apply(
+          buildHomeSections({
+            profile,
+            bundles: collectBundles(profile, null),
+            ytShelves: shelves,
+            // Fetch failed → the neutral global chips; never a hardcoded
+            // country list, and only after the provider had its chance.
+            moods: (moodTitles ?? FALLBACK_MOODS.map((m) => m.title)) as string[],
+          })
+        );
       });
       return;
     }

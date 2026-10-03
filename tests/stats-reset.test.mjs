@@ -26,12 +26,12 @@ test("production stats timer stays cleared after the real five-second deadline",
     stats.initStats();
     stats.recordListening({ id: "old", title: "Old", artist: "Artist", duration: 60, thumb: "" }, 30_000);
     stats.resetStats();
-    fs.rmSync(path.join(dir, "data", "stats"), { recursive: true, force: true });
+    fs.rmSync(path.join(dir, "data", "listening-history.json"), { force: true });
     await new Promise((resolve) => setTimeout(resolve, 5_150));
-    assert.equal(fs.existsSync(path.join(dir, "data", "stats")), false);
+    assert.equal(fs.existsSync(path.join(dir, "data", "listening-history.json")), false);
     assert.equal(stats.summary("month").totalMs, 0);
     stats.flushSync();
-    assert.equal(fs.existsSync(path.join(dir, "data", "stats")), false);
+    assert.equal(fs.existsSync(path.join(dir, "data", "listening-history.json")), false);
   } finally {
     stats?.resetStats();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -60,11 +60,11 @@ test("reset cancels stats flush and clears cached buckets and play-credit state"
     assert.equal(timers.size, 1);
     const staleCallback = [...timers][0];
     stats.resetStats();
-    fs.rmSync(path.join(dir, "data", "stats"), { recursive: true, force: true });
+    fs.rmSync(path.join(dir, "data", "listening-history.json"), { force: true });
     assert.equal(timers.size, 0);
     staleCallback();
     stats.flushSync();
-    assert.equal(fs.existsSync(path.join(dir, "data", "stats")), false);
+    assert.equal(fs.existsSync(path.join(dir, "data", "listening-history.json")), false);
     assert.equal(stats.summary("month").totalMs, 0);
     stats.recordListening(track, 30_000);
     stats.flushSync();

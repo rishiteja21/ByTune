@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { ContextMenu } from "./components/ContextMenu";
 import { Dialog } from "./components/primitives";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -236,10 +236,23 @@ function CurrentView(): ReactNode {
 
 export default function App() {
   const viewName = useUI((s) => s.view.name);
+  const viewReloadNonce = useUI((s) => s.viewReloadNonce);
+  const pendingScroll = useUI((s) => s.pendingScroll);
   const lyricsCenter = useUI((s) => s.lyricsCenter);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const session = useSession();
   const panelDrop = usePanelDrop();
+
+  // Back/forward land the user at the scroll they left the view at. Runs as a
+  // layout effect so the offset applies before the first paint of the restored
+  // view — no jump. Static pages (Settings) restore exactly; pages that refetch
+  // restore as far as their skeleton allows.
+  useLayoutEffect(() => {
+    if (pendingScroll === null) return;
+    const el = document.getElementById("view-scroll");
+    if (el) el.scrollTop = pendingScroll;
+    useUI.getState().clearPendingScroll();
+  }, [pendingScroll, viewName, viewReloadNonce]);
 
   // Session gate: onboarding until the user picks a mode (or straight in for
   // an existing guest/account). watchSession refreshes on auth:changed.
@@ -349,7 +362,11 @@ export default function App() {
           ) : (
             <>
               <div className="flex-1 min-h-0 overflow-y-auto scroll-host relative" id="view-scroll">
-                <div key={viewName} className="animate-rise-in px-10 pt-5 pb-6">
+                {/* The reload nonce rides in the key: a bump remounts the current
+                    view so its data effects re-run — that is the Refresh button's
+                    mechanism everywhere except Home (which re-orchestrates its
+                    feed without a remount). */}
+                <div key={`${viewReloadNonce}:${viewName}`} className="animate-rise-in px-10 pt-5 pb-6">
                   <ErrorBoundary>
                     <CurrentView />
                   </ErrorBoundary>

@@ -102,7 +102,7 @@ export function AlbumView({ albumId }: { albumId: string }) {
       <div className="relative -mx-10 overflow-hidden">
         <div className="absolute inset-0">
           {album.thumb ? (
-            <img src={upgradeArtwork(album.thumb)} alt="" className="w-full h-full object-cover" />
+            <img src={upgradeArtwork(album.thumb, 1200)} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full bg-ink-hi/[0.04] grid place-items-center">
               <Disc3 className="w-12 h-12 text-ink-hi/30" />

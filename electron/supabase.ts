@@ -39,6 +39,13 @@ export interface SessionInfo {
   freshInstall: boolean;
   /** Fresh Google sign-in still using the auto-generated username. */
   needsUsername?: boolean;
+  /**
+   * True only when this call CREATED the account (sign-up, or a first-ever
+   * Google sign-in). A guest's local data migrates up into a new account, but
+   * must never be mixed into an existing one — the account's own cloud copy
+   * is what should appear.
+   */
+  isNewAccount?: boolean;
 }
 
 let client: SupabaseClient | null = null;
@@ -243,7 +250,7 @@ export async function signUp(username: string, password: string): Promise<Sessio
   currentSession = data.session;
   await persistSession(data.session);
   const profile = await writeProfile({ mode: "account", userId, username: clean });
-  return { mode: profile.mode, userId, username: clean, freshInstall: false };
+  return { mode: profile.mode, userId, username: clean, freshInstall: false, isNewAccount: true };
 }
 
 export async function signIn(username: string, password: string): Promise<SessionInfo> {
@@ -258,7 +265,7 @@ export async function signIn(username: string, password: string): Promise<Sessio
   await persistSession(data.session);
   const userId = data.user.id;
   const profile = await writeProfile({ mode: "account", userId, username: clean });
-  return { mode: profile.mode, userId, username: profile.username ?? clean, freshInstall: false };
+  return { mode: profile.mode, userId, username: profile.username ?? clean, freshInstall: false, isNewAccount: false };
 }
 
 /* ------------------------------------------------------------------ */
@@ -405,11 +412,11 @@ async function finishGoogleSignIn(code: string): Promise<SessionInfo> {
     username = finalName;
     // Fresh Google user — let them choose a real username once.
     const profile = await writeProfile({ mode: "account", userId, username, pendingUsername: true });
-    return { mode: profile.mode, userId, username, freshInstall: false, needsUsername: true };
+    return { mode: profile.mode, userId, username, freshInstall: false, needsUsername: true, isNewAccount: true };
   }
   username = existing.username;
   const profile = await writeProfile({ mode: "account", userId, username });
-  return { mode: profile.mode, userId, username, freshInstall: false };
+  return { mode: profile.mode, userId, username, freshInstall: false, isNewAccount: false };
 }
 
 /**

@@ -23,8 +23,9 @@ import * as persist from "./persist";
 import { serializeData } from "./data-transition";
 import { validateCloudRows } from "./cloud-payload";
 import { authenticatedUserId, readProfile, sessionInfo } from "./supabase";
+import * as stats from "./stats";
 import { SYNCED_STORES } from "../src/lib/config";
-import { mergeLibrary, mergeListening, mergeRecentSearches, mergeSettings, mergeSyncMeta, stripDeviceSettings } from "./sync-merge";
+import { mergeArtistMeta, mergeLibrary, mergeListening, mergeListeningHistory, mergeRecentSearches, mergeSettings, mergeSyncMeta, stripDeviceSettings } from "./sync-merge";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 type SbClient = SupabaseClient<any, "public", any>;
@@ -207,6 +208,15 @@ function onSyncFailure(err: unknown, name?: string): void {
   }
 }
 
+/**
+ * Record a sync failure that happened outside the push path (a sign-in or
+ * sign-out backup), so the account card reports an error instead of silently
+ * claiming "Synced" over data that never reached the cloud.
+ */
+export function noteSyncFailure(err: unknown): void {
+  lastError = err instanceof Error ? err.message : String(err);
+}
+
 /** Device-owned fields never leave the machine. */
 function stripForUpload(name: string, data: unknown): unknown {
   if (!data || typeof data !== "object") return data;
@@ -217,6 +227,7 @@ function stripForUpload(name: string, data: unknown): unknown {
     return { ...envelope, state: keep };
   }
   if (name === "settings") return stripDeviceSettings(data);
+  if (name === "listening-history") return stats.fitForSync(data as { state?: { buckets?: unknown } });
   return data;
 }
 
@@ -243,6 +254,10 @@ function mergeStore(name: string, local: unknown, remote: unknown): { state: Rec
       return mergeLibrary(local, remote, localDevice);
     case "listening-signals":
       return mergeListening(local, remote);
+    case "listening-history":
+      return mergeListeningHistory(local, remote);
+    case "artist-meta-cache":
+      return mergeArtistMeta(local, remote);
     case "recent-searches":
       return mergeRecentSearches(local, remote);
     case "settings":
@@ -256,6 +271,17 @@ async function backupsDir(): Promise<string> {
   const dir = path.join(app.getPath("userData"), "data", "backups");
   await fs.promises.mkdir(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Every local store write goes through here so the Replay module can drop its
+ * in-memory bucket cache when the file it mirrors was just replaced by a
+ * restore or an account switch — otherwise its next flush would write the
+ * stale copy back over freshly restored data.
+ */
+async function writeLocalStore(name: string, data: unknown): Promise<void> {
+  await persist.writeData(name, data);
+  if (name === "listening-history") stats.reloadStore();
 }
 
 async function backupStore(name: string, data: unknown): Promise<void> {
@@ -336,7 +362,7 @@ export async function syncNowExclusive(): Promise<{ pushed: string[]; pulled: st
         const local = persist.readData(name);
         if (local != null) {
           await backupStore(name, local);
-          await persist.writeData(name, null);
+          await writeLocalStore(name, null);
         }
         // Already-empty stores must also reset the outgoing renderer state.
         restored.add(name);
@@ -346,11 +372,12 @@ export async function syncNowExclusive(): Promise<{ pushed: string[]; pulled: st
     meta.lastUserId = userId;
     saveMeta();
 
-    const cloud = new Map<string, { payload: unknown; updatedAt: number }>();
+    const cloud = new Map<string, { payload: unknown; updatedAt: number; sanitized: boolean }>();
     for (const row of validatedRows) {
       cloud.set(String(row.store_name), {
         payload: row.payload,
         updatedAt: new Date(String(row.updated_at)).getTime(),
+        sanitized: row.sanitized === true,
       });
     }
 
@@ -360,7 +387,9 @@ export async function syncNowExclusive(): Promise<{ pushed: string[]; pulled: st
     for (const name of SYNCED_STORES) {
       const local = persist.readData(name);
       const m = storeMeta(name);
-      const remote = cloud.get(name);
+      const remoteRow = cloud.get(name);
+      const remote = remoteRow ? { payload: remoteRow.payload, updatedAt: remoteRow.updatedAt } : undefined;
+      const cloudHealed = remoteRow?.sanitized === true;
       // A store that has never been synced but has local data counts as
       // locally changed — that's the guest→account migration case (its
       // local content must survive into the account, via merge).
@@ -369,10 +398,13 @@ export async function syncNowExclusive(): Promise<{ pushed: string[]; pulled: st
 
       if (local == null && remote) {
         // Nothing local — restore from the cloud.
-        await persist.writeData(name, remote.payload);
+        await writeLocalStore(name, remote.payload);
         restored.add(name);
         meta.stores[name] = { syncedAt: remote.updatedAt, changedAt: remote.updatedAt };
         pulled.push(name);
+        // Validation dropped something from the cloud copy — push the healed
+        // version back so the account stops carrying the damage.
+        if (cloudHealed) await pushStore(name, sbc, userId);
         continue;
       }
       if (local == null || !remote) {
@@ -388,7 +420,7 @@ export async function syncNowExclusive(): Promise<{ pushed: string[]; pulled: st
         await backupStore(name, remote.payload);
         const mergedEnvelope = mergeStore(name, local, remote.payload);
         const next = mergedEnvelope ?? (remote.updatedAt > m.syncedAt ? remote.payload : local);
-        await persist.writeData(name, next);
+        await writeLocalStore(name, next);
         restored.add(name);
         await pushStore(name, sbc, userId);
         meta.stores[name] = { syncedAt: Date.now(), changedAt: Date.now() };
@@ -405,10 +437,11 @@ export async function syncNowExclusive(): Promise<{ pushed: string[]; pulled: st
         if (remoteState && Object.keys(device).length > 0) {
           payload = { ...(remote.payload as object), state: { ...remoteState, ...device } };
         }
-        await persist.writeData(name, payload);
+        await writeLocalStore(name, payload);
         restored.add(name);
         meta.stores[name] = { syncedAt: remote.updatedAt, changedAt: remote.updatedAt };
         pulled.push(name);
+        if (cloudHealed) await pushStore(name, sbc, userId);
         continue;
       }
       if (localChanged) {
@@ -470,9 +503,12 @@ async function restoreNowExclusive(): Promise<string[]> {
       if (remoteState && Object.keys(device).length > 0) {
         payload = { ...(row.payload as object), state: { ...remoteState, ...device } };
       }
-      await persist.writeData(name, payload);
+      await writeLocalStore(name, payload);
       pulled.push(name);
       meta.stores[name] = { syncedAt: Date.now(), changedAt: Date.now() };
+      // Heal the cloud copy too: a manual restore that had to drop records
+      // leaves the sanitized version behind for every future sync.
+      if (row.sanitized) await pushStore(name, sbc, userId);
     }
     saveMeta();
     lastSyncAt = Date.now();

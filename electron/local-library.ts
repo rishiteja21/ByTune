@@ -508,6 +508,16 @@ export async function scanLibrary(
   const { parseFile } = await import("music-metadata");
   checkGeneration(generation);
   const tracks: LocalTrack[] = [];
+
+  /**
+   * Tag duration in whole seconds. `music-metadata` reports NaN (not
+   * undefined) for files with damaged or absent headers, and `?? 0` does not
+   * catch NaN — a NaN duration serializes to JSON `null`, which made the whole
+   * cloud library row unreadable and broke every sync and restore.
+   */
+  const parsedDuration = (value: number | undefined): number =>
+    typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+
   const prevByPath = new Map(existing.tracks.map((t) => [t.path, t]));
   let done = 0;
   for (const f of files) {
@@ -551,7 +561,7 @@ export async function scanLibrary(
         artist: bounded(c.artist?.trim()) || bounded(c.albumartist?.trim()) || track.artist,
         album: bounded(c.album?.trim()) || track.album,
         genre: bounded(c.genre?.[0]),
-        duration: Math.round(meta.format.duration ?? 0),
+        duration: parsedDuration(meta.format.duration),
         // Re-parsed (mtime changed) → refresh the extracted cover too.
         art: extractArt(hashPath(f.abs), c.picture?.[0], true),
       };

@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Activity,
   AppWindow,
   BarChart3,
+  Check,
   ChevronRight,
   CloudDownload,
   CloudUpload,
@@ -32,13 +33,11 @@ import {
   DOWNLOAD_QUALITY_LABEL,
   STREAM_QUALITY_LABEL,
   useSettings,
-  type DownloadQuality,
-  type StreamQuality,
 } from "../stores/settings";
 import { useSession } from "../lib/session";
 import { setOnboardingIntent } from "../lib/onboardingIntent";
 import { GuestDeleteModal } from "../components/AccountModals";
-import { useUI } from "../stores/ui";
+import { useUI, type MenuItem } from "../stores/ui";
 
 /* ============================================================ settings chrome
    Settings are inset cards of rows: an uppercase group header, a
@@ -127,6 +126,7 @@ function SettingsRow({
   badge,
   disabled,
   onClick,
+  onPointerDown,
   trailing,
 }: {
   icon: React.ComponentType<{ className?: string }>;
@@ -135,13 +135,18 @@ function SettingsRow({
   value?: string;
   badge?: string;
   disabled?: boolean;
-  onClick?: () => void;
+  /** receives the event so rows can anchor a dropdown to themselves */
+  onClick?: (e: React.MouseEvent) => void;
+  /** dropdown rows stop the press here — the open menu survives until the
+      click, letting the same row toggle it closed (playbar "+" pattern) */
+  onPointerDown?: (e: React.PointerEvent) => void;
   trailing?: ReactNode;
 }) {
   const interactive = onClick && !disabled;
   return (
     <div
-      onClick={interactive ? onClick : undefined}
+      onPointerDown={onPointerDown}
+      onClick={interactive ? (e) => onClick(e) : undefined}
       className={`flex items-center min-h-[52px] py-3 ${ROW_INSET} ${
         interactive ? "cursor-pointer hover:bg-ink-hi/[0.04] active:bg-ink-hi/[0.07] transition-colors" : ""
       } ${disabled ? "opacity-45" : ""}`}
@@ -192,6 +197,11 @@ function SettingsSubRow({
   );
 }
 
+/** Thumb width of the .slider CSS — the fill is computed so it ends exactly
+    at the thumb's centre (the native input insets the thumb by half its
+    width at both ends of the range). */
+const SLIDER_THUMB_PX = 13;
+
 function SliderRow({
   icon: Icon,
   title,
@@ -213,6 +223,7 @@ function SliderRow({
   current: number;
   onChange: (v: number) => void;
 }) {
+  const frac = max > min ? Math.min(1, Math.max(0, (current - min) / (max - min))) : 0;
   return (
     <div className={`${ROW_INSET} py-3`}>
       <div className="flex items-center">
@@ -230,14 +241,51 @@ function SliderRow({
         step={step}
         value={current}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="slider w-full mt-3 ml-[36px]"
-        style={{ width: "calc(100% - 36px)" }}
+        className="slider slider-dot w-full mt-3 ml-[36px]"
+        style={
+          {
+            width: "calc(100% - 36px)",
+            "--fill": `calc((100% - ${SLIDER_THUMB_PX}px) * ${frac} + ${SLIDER_THUMB_PX / 2}px)`,
+          } as CSSProperties
+        }
       />
     </div>
   );
 }
 
 /* ============================================================ view */
+
+/** Builds the option list for the quality dropdowns. Every row carries the
+    check glyph — filled on the current value, invisible on the rest so the
+    labels keep their alignment — and picking one commits it immediately. */
+function qualityMenu<T extends string>(
+  order: T[],
+  labels: Record<T, string>,
+  current: T,
+  onPick: (q: T) => void,
+): MenuItem[] {
+  return order.map((q) => ({
+    label: labels[q],
+    icon: Check,
+    iconClassName: q === current ? "text-accent" : "opacity-0",
+    action: () => onPick(q),
+  }));
+}
+
+/** Opens the row's dropdown, right-aligned under the row's value — and
+    toggles it closed when one is already open. Same contract as the playbar
+    "+": the row's pointerdown keeps an open menu alive until this click (see
+    SettingsRow's onPointerDown), so the click itself can close it. */
+function toggleDropdownAt(e: React.MouseEvent, items: MenuItem[]): void {
+  e.stopPropagation();
+  const ui = useUI.getState();
+  if (ui.contextMenu) {
+    ui.closeContextMenu();
+    return;
+  }
+  const rect = e.currentTarget.getBoundingClientRect();
+  ui.openContextMenu(rect.right, rect.bottom + 6, items, { alignRight: true });
+}
 
 /**
  * ByTune account — the cloud layer above the YouTube cookie. Guests keep
@@ -388,7 +436,7 @@ function CloudAccountGroup() {
             <button
               onClick={signOutWithConfirm}
               disabled={busy}
-              className="h-9 px-3.5 rounded-lg bg-ink-hi/[0.08] hover:bg-ink-hi/[0.14] text-[13px] font-semibold text-ink-hi transition-colors disabled:opacity-40"
+              className="h-9 px-3.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-[13px] font-semibold transition-colors disabled:opacity-40"
             >
               Sign out
             </button>
@@ -539,11 +587,18 @@ export function SettingsView() {
           title="Streaming quality"
           subtitle="Ceiling for streamed audio"
           value={STREAM_QUALITY_LABEL[s.streamingQuality]}
-          onClick={() => {
-            const order: StreamQuality[] = ["low", "medium", "high", "lossless"];
-            const next = order[(order.indexOf(s.streamingQuality) + 1) % order.length];
-            s.setStreamingQuality(next);
-          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) =>
+            toggleDropdownAt(
+              e,
+              qualityMenu(
+                ["low", "medium", "high", "lossless"],
+                STREAM_QUALITY_LABEL,
+                s.streamingQuality,
+                s.setStreamingQuality
+              )
+            )
+          }
         />
       </SettingsGroup>
 
@@ -563,11 +618,18 @@ export function SettingsView() {
           title="Download quality"
           subtitle="What a saved track costs on disk"
           value={DOWNLOAD_QUALITY_LABEL[s.downloadQuality]}
-          onClick={() => {
-            const order: DownloadQuality[] = ["standard", "high", "lossless"];
-            const next = order[(order.indexOf(s.downloadQuality) + 1) % order.length];
-            s.setDownloadQuality(next);
-          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) =>
+            toggleDropdownAt(
+              e,
+              qualityMenu(
+                ["standard", "high", "lossless"],
+                DOWNLOAD_QUALITY_LABEL,
+                s.downloadQuality,
+                s.setDownloadQuality
+              )
+            )
+          }
         />
         <SettingsSubRow
           title="Export compatible downloads"

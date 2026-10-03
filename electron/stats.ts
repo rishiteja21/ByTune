@@ -2,10 +2,11 @@
  * Listening statistics.
  *
  * The renderer reports listened seconds per track on a play-event bus
- * (see src/lib/playEvents.ts); this module folds them into monthly JSON
- * buckets next to the other persisted stores:
+ * (see src/lib/playEvents.ts); this module folds them into monthly buckets
+ * persisted as the `listening-history` store:
  *
- *   stats/<YYYY-MM>.json = {
+ *   listening-history.json = { state: { buckets: [MonthBucket] }, version: 1 }
+ *   MonthBucket = {
  *     month, tracks: {id → {title, artist, thumb, ms, plays, lastAt}},
  *     artists: {lowercased name → {name, ms, plays}},
  *     albums: {album key → {name, artist, ms, plays}},
@@ -18,12 +19,17 @@
  * looped track earns hours but a single play. Nothing here is inferred
  * beyond what was actually reported — no fake numbers.
  *
- * Retention mirrors mobile: 36 monthly files, 600 tracks / 400 artists+albums
+ * Retention mirrors mobile: 36 monthly buckets, 600 tracks / 400 artists+albums
  * per bucket, lowest-listened entries pruned first.
+ *
+ * Because Replay lives in a synced store it follows the account (not the
+ * machine): switching accounts swaps Replay, and a wiped device or a
+ * reinstall restores it from the cloud like the rest of the library.
  */
 import { app } from "electron";
 import * as fs from "fs";
 import * as path from "path";
+import * as persist from "./persist";
 import type { Track } from "../src/types";
 
 export interface TrackEntry {
@@ -37,6 +43,8 @@ export interface TrackEntry {
 export interface NameEntry {
   name: string;
   artist?: string;
+  /** Cover art — for albums the track's own artwork, for artists the artist photo. */
+  thumb?: string;
   ms: number;
   plays: number;
 }
@@ -66,15 +74,21 @@ export interface ReplaySummary {
 const PLAY_FLOOR_MS = 30_000;
 const PLAY_CEILING_MS = 4 * 60 * 1000;
 /** Retention mirrors mobile (ListeningStats prune): 36 months on disk. */
-const KEEP_MONTHS = 36;
+export const KEEP_MONTHS = 36;
 const MAX_TRACKS = 600;
 const MAX_NAMES = 400;
 const FLUSH_EVERY_MS = 5000;
 
+/** Cloud rows are capped at 8 MiB; keep a margin for envelope overhead. */
+export const SYNC_BUDGET_BYTES = 6 * 1024 * 1024;
+
+export const HISTORY_STORE = "listening-history";
+
 let ready = false;
-let dir = "";
 const open = new Map<string, MonthBucket>();
-const pendingIds = new Set<string>();
+/** True when memory holds changes not yet written to the store. */
+let dirty = false;
+let loaded = false;
 let flushTimer: NodeJS.Timeout | null = null;
 /**
  * Play-count rule state, per mobile's ListeningRecorder: one play per track
@@ -92,10 +106,6 @@ export function noteTrackStart(trackId: string): void {
   ruleCounted.delete(trackId);
 }
 
-function dataDir(): string {
-  return path.join(app.getPath("userData"), "data", "stats");
-}
-
 function monthKey(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -110,30 +120,90 @@ function newBucket(month: string): MonthBucket {
   return { month, tracks: {}, artists: {}, albums: {}, hours: new Array(24).fill(0), days: {} };
 }
 
-function readBucket(month: string): MonthBucket {
-  const file = path.join(dir, `${month}.json`);
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as MonthBucket;
-    if (raw && typeof raw === "object" && Array.isArray(raw.hours) && raw.hours.length === 24) {
-      raw.tracks ??= {};
-      raw.artists ??= {};
-      raw.albums ??= {};
-      raw.days ??= {};
-      return raw;
+function coerceBucket(raw: any): MonthBucket | null {
+  if (!raw || typeof raw !== "object" || !/^\d{4}-\d{2}$/.test(String(raw.month ?? ""))) return null;
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+  const rec = <T>(v: unknown): Record<string, T> => {
+    const out: Record<string, T> = {};
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [k, e] of Object.entries(v as Record<string, any>)) {
+        const t = (e?.title ?? e?.name) as unknown;
+        if (typeof t === "string" && typeof e?.ms === "number") {
+          out[k] = {
+            title: String(t), name: String(e?.name ?? t), artist: e?.artist,
+            thumb: typeof e?.thumb === "string" ? e.thumb : undefined,
+            ms: num(e.ms), plays: num(e.plays), lastAt: num(e.lastAt),
+          } as unknown as T;
+        }
+      }
     }
-  } catch {
-    /* absent or corrupt → fresh */
-  }
-  return newBucket(month);
+    return out;
+  };
+  return {
+    month: raw.month,
+    tracks: rec<TrackEntry>(raw.tracks),
+    artists: rec<NameEntry>(raw.artists),
+    albums: rec<NameEntry>(raw.albums),
+    hours: Array.isArray(raw.hours) && raw.hours.length === 24 ? raw.hours.map(num) : new Array(24).fill(0),
+    days: Object.fromEntries(
+      Object.entries(raw.days && typeof raw.days === "object" && !Array.isArray(raw.days) ? raw.days : {})
+        .filter(([d, ms]) => /^\d{4}-\d{2}-\d{2}$/.test(d) && typeof ms === "number")
+        .map(([d, ms]) => [d, num(ms)])
+    ),
+  };
 }
 
-function bucketFor(month: string): MonthBucket {
-  let b = open.get(month);
-  if (!b) {
-    b = readBucket(month);
-    open.set(month, b);
+/** Read the persisted bucket set once (account-scoped store). */
+function loadAll(): void {
+  if (loaded) return;
+  loaded = true;
+  const raw = persist.readData(HISTORY_STORE) as { state?: { buckets?: unknown } } | null;
+  const buckets = raw?.state?.buckets;
+  for (const b of Array.isArray(buckets) ? buckets : []) {
+    const clean = coerceBucket(b);
+    if (clean) open.set(clean.month, clean);
   }
-  return b;
+}
+
+function envelopePayload(): { state: { buckets: MonthBucket[] }; version: number } {
+  const buckets = [...open.values()].sort((a, b) => (a.month < b.month ? -1 : 1));
+  return { state: { buckets }, version: 1 };
+}
+
+/** Drop months past the retention horizon; the next flush writes the result. */
+function pruneOldBuckets(): void {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - KEEP_MONTHS);
+  const cutoffKey = monthKey(cutoff);
+  for (const month of [...open.keys()]) {
+    if (month < cutoffKey) {
+      open.delete(month);
+      markDirty();
+    }
+  }
+}
+
+function markDirty(): void { dirty = true; }
+
+/**
+ * Called after this module writes the store, so the sync engine learns the
+ * change. Replay is written by the main process — unlike the renderer stores
+ * it flows through no IPC write handler — so without this hook its changes
+ * would upload once on sign-in and then never again.
+ */
+let notifyWrite: (() => void) | null = null;
+
+/** Wire the sync engine (main.ts) so Replay changes schedule a cloud push. */
+export function onStoreWrite(fn: () => void): void {
+  notifyWrite = fn;
+}
+
+function storeWritten(): void {
+  try {
+    notifyWrite?.();
+  } catch {
+    /* a broken listener must never break recording */
+  }
 }
 
 function scheduleFlush(): void {
@@ -144,51 +214,124 @@ function scheduleFlush(): void {
   }, FLUSH_EVERY_MS);
 }
 
-function writeBucket(month: string): void {
-  const b = open.get(month);
-  if (!b) return;
-  pruneBucket(b);
-  const file = path.join(dir, `${month}.json`);
-  const tmp = `${file}.tmp`;
+async function flush(): Promise<void> {
+  if (!ready || !dirty) return;
+  pruneOldBuckets();
+  dirty = false;
+  await writeStore();
+}
+
+/**
+ * Write the whole bucket set. One file per flush (not per month) keeps the
+ * store self-consistent: a partial write can never leave months half-applied.
+ */
+async function writeStore(): Promise<void> {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(b));
-    fs.renameSync(tmp, file);
+    await persist.writeData(HISTORY_STORE, envelopePayload());
+    storeWritten();
   } catch (err) {
     console.warn("[bytune] stats flush failed:", err instanceof Error ? err.message : err);
   }
 }
 
-async function flush(): Promise<void> {
-  if (!ready) return;
-  const ids = [...pendingIds];
-  pendingIds.clear();
-  for (const month of ids) writeBucket(month);
-  pruneOldFiles();
-}
-
-/** Discard cached history before deleting its files; never flush the old session again. */
+/** Discard cached history before the store is deleted; never flush it back. */
 export function resetStats(): void {
   if (flushTimer) clearTimeout(flushTimer);
   flushTimer = null;
-  pendingIds.clear();
+  dirty = false;
   open.clear();
+  loaded = false;
   ruleMs.clear();
   ruleCounted.clear();
 }
 
+/**
+ * Drop the in-memory bucket cache and re-read the store. Called whenever
+ * something outside this module replaces the file — a cloud restore or an
+ * account switch — so the next flush can never write a stale copy back over
+ * freshly restored data.
+ */
+export function reloadStore(): void {
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = null;
+  dirty = false;
+  open.clear();
+  loaded = false;
+  ruleMs.clear();
+  ruleCounted.clear();
+  loadAll();
+}
+
 export function initStats(): void {
   if (ready) return;
-  dir = dataDir();
-  fs.mkdirSync(dir, { recursive: true });
   ready = true;
+  loadAll();
+  migrateLegacyStats();
+}
+
+/**
+ * One-time import of the pre-store monthly files. Replay used to live in
+ * loose `data/stats/<YYYY-MM>.json` files that never synced, so a device
+ * reset or a reinstall threw a history away that the cloud never saw. Any
+ * such files still on disk are folded into the synced store here.
+ *
+ * The directory is consumed after a successful import: a "Reset app data"
+ * empties the store, and an unconsumed legacy copy would then resurrect the
+ * exact history the user just asked to erase. Live months always win, so a
+ * partially-synced history is never regressed by an older snapshot.
+ */
+function migrateLegacyStats(): void {
+  // `userData/data/stats` is where the monthly files lived; the nested
+  // `userData/data/data/stats` is the same folder preserved from an older
+  // userData layout that ended up inside the current one.
+  const roots = [
+    path.join(app.getPath("userData"), "data", "stats"),
+    path.join(app.getPath("userData"), "data", "data", "stats"),
+  ];
+  for (const dir of roots) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter((f) => /^\d{4}-\d{2}\.json$/.test(f));
+    } catch {
+      continue; // no legacy copy here
+    }
+    let imported = 0;
+    for (const f of files) {
+      try {
+        const clean = coerceBucket(JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8")));
+        if (!clean || open.has(clean.month)) continue;
+        pruneBucket(clean);
+        open.set(clean.month, clean);
+        imported += 1;
+      } catch {
+        /* unreadable file — skip it */
+      }
+    }
+    if (imported === 0) continue;
+    dirty = true;
+    // Synchronous, and before the legacy dir is removed: the boot sequence
+    // signs in right after this and a cloud restore calls reloadStore(), which
+    // re-reads this file. An async write here could lose the recovered months
+    // to that reload — and the dir would already be gone.
+    try {
+      persist.writeDataSync(HISTORY_STORE, envelopePayload());
+      dirty = false;
+      storeWritten();
+    } catch (err) {
+      console.warn("[bytune] stats recovery flush failed:", err instanceof Error ? err.message : err);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`[bytune] recovered ${imported} Replay month(s) from legacy stats files`);
+  }
 }
 
 /** Fold one span of listening into the buckets. */
 export function recordListening(track: Track, listenedMs: number, at = new Date()): void {
   if (!ready || !track?.id || listenedMs <= 0) return;
+  loadAll();
   const month = monthKey(at);
-  const b = bucketFor(month);
+  const b = open.get(month) ?? newBucket(month);
+  open.set(month, b);
   const day = `${month}-${String(at.getDate()).padStart(2, "0")}`;
 
   const t = (b.tracks[track.id] ??= {
@@ -209,11 +352,16 @@ export function recordListening(track: Track, listenedMs: number, at = new Date(
   const a = (b.artists[key] ??= { name: track.artist || "Unknown artist", ms: 0, plays: 0 });
   a.name = track.artist || "Unknown artist";
   a.ms += listenedMs;
+  // The artist's own photo, when the track carries one — Replay's Top artists
+  // would otherwise only ever show a generic icon.
+  if (!a.thumb && track.artistImage) a.thumb = track.artistImage;
 
   if (track.album) {
     const ak = `${track.album.toLowerCase()}|${key}`;
     const al = (b.albums[ak] ??= { name: track.album, artist: track.artist, ms: 0, plays: 0 });
     al.ms += listenedMs;
+    // A track's artwork is its album's cover — the cheapest honest source.
+    if (!al.thumb && track.thumb) al.thumb = track.thumb;
   }
 
   b.hours[at.getHours()] += listenedMs;
@@ -235,12 +383,9 @@ export function recordListening(track: Track, listenedMs: number, at = new Date(
     }
   }
 
-  pendingIds.add(month);
+  dirty = true;
+  pruneBucket(b);
   scheduleFlush();
-}
-
-function mergedBuckets(months: string[]): MonthBucket[] {
-  return months.map((m) => bucketFor(m));
 }
 
 function monthsForPeriod(period: ReplayPeriod): string[] {
@@ -252,21 +397,13 @@ function monthsForPeriod(period: ReplayPeriod): string[] {
     for (let m = 0; m <= now.getMonth(); m++) out.push(`${now.getFullYear()}-${String(m + 1).padStart(2, "0")}`);
     return out;
   }
-  try {
-    return fs
-      .readdirSync(dir)
-      .filter((f) => /^\d{4}-\d{2}\.json$/.test(f))
-      .map((f) => f.slice(0, 7))
-      .sort();
-  } catch {
-    return [monthKey(now)];
-  }
+  return [...open.keys()].sort();
 }
 
 export function summary(period: ReplayPeriod): ReplaySummary {
   if (!ready) initStats();
   const months = monthsForPeriod(period);
-  const buckets = mergedBuckets(months);
+  const buckets = months.map((m) => open.get(m)).filter((b): b is MonthBucket => !!b);
 
   const tracks = new Map<string, TrackEntry & { id: string }>();
   const artists = new Map<string, NameEntry>();
@@ -292,6 +429,9 @@ export function summary(period: ReplayPeriod): ReplaySummary {
       totalMs += t.ms;
     }
     for (const [k, a] of Object.entries(b.artists)) {
+      // Untagged local files land here as a real artist — real listening, but
+      // never an artist worth naming in a Top artists list.
+      if (k === "unknown artist") continue;
       const cur = artists.get(k) ?? { ...a, ms: 0, plays: 0 };
       cur.ms += a.ms;
       cur.plays += a.plays;
@@ -320,12 +460,16 @@ export function summary(period: ReplayPeriod): ReplaySummary {
   };
 }
 
+/** Synchronous persist for shutdown paths: `before-quit` cannot await. */
 export function flushSync(): void {
-  if (flushTimer) {
-    clearTimeout(flushTimer);
-    flushTimer = null;
+  if (!ready || !dirty) return;
+  dirty = false;
+  try {
+    persist.writeDataSync(HISTORY_STORE, envelopePayload());
+    storeWritten();
+  } catch (err) {
+    console.warn("[bytune] stats flush failed:", err instanceof Error ? err.message : err);
   }
-  void flush();
 }
 
 /** Trim one bucket to the retention caps (lowest-listened entries go first). */
@@ -343,84 +487,42 @@ function pruneBucket(b: MonthBucket): void {
   trim(b.albums, MAX_NAMES, (a) => a.ms);
 }
 
-/** Drop monthly files older than KEEP_MONTHS (called on flush, throttled). */
-let lastPruneFiles = 0;
-function pruneOldFiles(): void {
-  const now = Date.now();
-  if (now - lastPruneFiles < 60 * 60 * 1000) return;
-  lastPruneFiles = now;
-  try {
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - KEEP_MONTHS);
-    const cutoffKey = monthKey(cutoff);
-    for (const f of fs.readdirSync(dir)) {
-      if (!/^\d{4}-\d{2}\.json$/.test(f)) continue;
-      const key = f.slice(0, 7);
-      if (key < cutoffKey) {
-        try {
-          fs.unlinkSync(path.join(dir, f));
-        } catch {
-          /* ignore */
-        }
-        open.delete(key);
-      }
-    }
-  } catch {
-    /* stats dir may not exist yet */
-  }
-}
-
-/** Read every monthly bucket (for backup export). */
+/** Read every monthly bucket (for backup export + cloud push). */
 export function exportAll(): MonthBucket[] {
   if (!ready) initStats();
-  // Flush first: the last seconds of listening may still sit in memory.
-  for (const m of [...pendingIds]) writeBucket(m);
-  pendingIds.clear();
-  try {
-    return fs
-      .readdirSync(dir)
-      .filter((f) => /^\d{4}-\d{2}\.json$/.test(f))
-      .sort()
-      .map((f) => readBucket(f.slice(0, 7)));
-  } catch {
-    return [];
-  }
+  return [...open.values()].sort((a, b) => (a.month < b.month ? -1 : 1));
 }
 
-/** Replace all monthly buckets (backup import — validated by the caller). */
+/** Replace all monthly buckets (backup import / cloud restore — caller validates). */
 export function importAll(buckets: MonthBucket[]): void {
   if (!ready) initStats();
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    for (const f of fs.readdirSync(dir)) {
-      if (/^\d{4}-\d{2}\.json$/.test(f)) {
-        try {
-          fs.unlinkSync(path.join(dir, f));
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
   open.clear();
-  pendingIds.clear();
+  dirty = false;
   ruleMs.clear();
   ruleCounted.clear();
   for (const b of buckets) {
-    if (!b || !/^\d{4}-\d{2}$/.test(b.month)) continue;
-    const clean: MonthBucket = {
-      month: b.month,
-      tracks: b.tracks && typeof b.tracks === "object" ? b.tracks : {},
-      artists: b.artists && typeof b.artists === "object" ? b.artists : {},
-      albums: b.albums && typeof b.albums === "object" ? b.albums : {},
-      hours: Array.isArray(b.hours) && b.hours.length === 24 ? b.hours : new Array(24).fill(0),
-      days: b.days && typeof b.days === "object" ? b.days : {},
-    };
+    const clean = coerceBucket(b);
+    if (!clean) continue;
     pruneBucket(clean);
     open.set(clean.month, clean);
-    pendingIds.add(clean.month);
   }
-  scheduleFlush();
+  pruneOldBuckets();
+  dirty = true;
+  void writeStore();
+}
+
+/**
+ * Bound the cloud copy for upload: the payload cap is 8 MiB and a full
+ * 36-month history could exceed it, so oldest months are dropped first until
+ * the envelope fits. Local retention is untouched — only what travels is cut.
+ */
+export function fitForSync(payload: unknown): unknown {
+  const buckets = (payload as { state?: { buckets?: unknown } } | null)?.state?.buckets;
+  if (!Array.isArray(buckets)) return payload;
+  let out = buckets;
+  while (out.length > 0 && Buffer.byteLength(JSON.stringify({ state: { buckets: out }, version: 1 })) > SYNC_BUDGET_BYTES) {
+    out = out.slice(1);
+  }
+  if (out === buckets) return payload;
+  return { ...(payload as object), state: { buckets: out } };
 }

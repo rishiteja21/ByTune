@@ -86,6 +86,7 @@ async function loadIpcHandlers() {
       if (name === "./stats") return {
         initStats() {}, flushSync() {}, resetStats() {},
         noteTrackStart() {}, recordListening() {}, summary: () => ({}),
+        onStoreWrite() {}, HISTORY_STORE: "listening-history",
       };
       if (name === "./stream-proxy") return {
         proxyUrlFor: async () => "http://127.0.0.1:1/x", proxyUrlForLocalTrack: () => null, startStreamProxy: async () => {},

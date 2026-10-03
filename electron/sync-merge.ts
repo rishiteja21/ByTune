@@ -161,6 +161,72 @@ export function mergeSettings(
 }
 
 /* ------------------------------------------------------------------ */
+/* Listening history (Replay) — per month bucket, max per record        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Merge two Replay month-bucket sets. Listening time is additive on one
+ * device but must not double count across devices, so per record the side
+ * with more listened ms wins (same policy as mergeListening's skip tallies).
+ * Hours-of-day and per-day totals are maxed per slot for the same reason.
+ */
+export function mergeListeningHistory(localPayload: Envelope, remotePayload: Envelope): { state: Record<string, unknown>; version: number } {
+  const local = stateOf(localPayload);
+  const remote = stateOf(remotePayload);
+  const toMap = (v: unknown): Map<string, any> => {
+    const out = new Map<string, any>();
+    for (const b of Array.isArray(v) ? v : []) {
+      if (b && typeof b === "object" && typeof (b as any).month === "string") out.set((b as any).month, b);
+    }
+    return out;
+  };
+  const a = toMap(local.buckets);
+  const b = toMap(remote.buckets);
+
+  const mergeNamed = (x: any, y: any): any => (!x ? y : !y ? x : (y.ms ?? 0) > (x.ms ?? 0) ? y : x);
+  const buckets: any[] = [];
+  for (const [month, lb] of a) {
+    const rb = b.get(month);
+    if (!rb) { buckets.push(lb); continue; }
+    buckets.push({
+      month,
+      tracks: mergeNamed(lb.tracks, rb.tracks),
+      artists: mergeNamed(lb.artists, rb.artists),
+      albums: mergeNamed(lb.albums, rb.albums),
+      hours: Array.from({ length: 24 }, (_v, i) => Math.max(Number(lb?.hours?.[i]) || 0, Number(rb?.hours?.[i]) || 0)),
+      days: (() => {
+        const days: Record<string, number> = {};
+        for (const [d, ms] of Object.entries({ ...(rb?.days ?? {}), ...(lb?.days ?? {}) })) {
+          days[d] = Math.max(Number((rb?.days ?? {})[d]) || 0, Number((lb?.days ?? {})[d]) || 0);
+        }
+        return days;
+      })(),
+    });
+  }
+  for (const [month, rb] of b) if (!a.has(month)) buckets.push(rb);
+  buckets.sort((x, y) => (x.month < y.month ? -1 : 1));
+
+  return envelope({ ...remote, ...local, buckets }, mergedVersion(localPayload, remotePayload));
+}
+
+/* ------------------------------------------------------------------ */
+/* Artist identity cache — union by name, freshest resolution wins      */
+/* ------------------------------------------------------------------ */
+
+export function mergeArtistMeta(localPayload: Envelope, remotePayload: Envelope): { state: Record<string, unknown>; version: number } {
+  const local = stateOf(localPayload);
+  const remote = stateOf(remotePayload);
+  const a = (local.byName ?? {}) as Record<string, { resolvedAt?: number }>;
+  const b = (remote.byName ?? {}) as Record<string, { resolvedAt?: number }>;
+  const byName: Record<string, { resolvedAt?: number }> = {};
+  for (const [name, meta] of [...Object.entries(a), ...Object.entries(b)]) {
+    const cur = byName[name];
+    if (!cur || (meta?.resolvedAt ?? 0) > (cur.resolvedAt ?? 0)) byName[name] = meta;
+  }
+  return envelope({ ...remote, ...local, byName }, mergedVersion(localPayload, remotePayload));
+}
+
+/* ------------------------------------------------------------------ */
 /* sync-meta — merge the running session's mirror with the disk copy   */
 /* ------------------------------------------------------------------ */
 

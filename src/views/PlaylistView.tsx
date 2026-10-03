@@ -86,7 +86,7 @@ export function PlaylistView({ playlistId }: { playlistId: string }) {
       <div className="relative -mx-10 overflow-hidden">
         <div className="absolute inset-0">
           {coverThumb ? (
-            <img src={upgradeArtwork(coverThumb)} alt="" className="w-full h-full object-cover" />
+            <img src={upgradeArtwork(coverThumb, 1200)} alt="" className="w-full h-full object-cover" />
           ) : (
             /* Default cover — ByTune violet gradient with a big soft note
                watermark, Spotify's default-playlist-cover model. The bottom

@@ -56,6 +56,8 @@ let pendingSeek = 0;
 let retryCount = 0;
 /** consecutive tracks that failed to play — stops auto-skipping eventually */
 let consecutiveFailures = 0;
+/** the unlinked-local-folder explainer fires once per failing streak, not per skip */
+let localMissingToasted = false;
 let historyForId: string | null = null;
 /** track id the engine itself is advancing to via crossfade — suppresses reload */
 let advancingToId: string | null = null;
@@ -814,6 +816,7 @@ export function initAudioEngine(): void {
       if (i !== mainIdx) return;
       usePlayer.getState()._setBuffering(false);
       consecutiveFailures = 0;
+      localMissingToasted = false;
       const cur = usePlayer.getState().queue[usePlayer.getState().index];
       if (cur && historyForId !== cur.id) {
         historyForId = cur.id;
@@ -1173,13 +1176,33 @@ function handleFailure(track: Track, err?: unknown): void {
     return;
   }
   consecutiveFailures += 1;
+  // A local: track that resolves to nothing means ByTune lost the file's
+  // folder — a data reset, a fresh sign-in on this device, or the drive is
+  // away. The entries survive in synced playlists, and re-importing the
+  // folder relinks them (ids are hashes of the file's absolute path).
+  const isLocal = !!track.localPath || track.id.startsWith("local:");
+  const localGoneMsg = `Couldn't play "${track.title}" — its local file can't be reached on this device. Re-add the folder in Local Music to relink your songs.`;
   if (state.playing && consecutiveFailures <= MAX_SKIPS) {
     console.warn(`[bytune] playback failed for ${track.id}`, err);
-    useUI.getState().toast(`Couldn't play "${track.title}" — skipping`, "error");
+    if (isLocal) {
+      // One explainer per failing streak — a whole playlist of unlinked
+      // locals must not stack five identical toasts.
+      if (!localMissingToasted) {
+        localMissingToasted = true;
+        useUI.getState().toast(localGoneMsg, "warning", 7000);
+      }
+    } else {
+      useUI.getState().toast(`Couldn't play "${track.title}" — skipping`, "error");
+    }
     state.next(false);
   } else {
     usePlayer.setState({ playing: false, error: "Playback failed" });
-    useUI.getState().toast(`Couldn't play "${track.title}"`, "error");
+    if (isLocal) {
+      localMissingToasted = false;
+      useUI.getState().toast(localGoneMsg, "warning", 7000);
+    } else {
+      useUI.getState().toast(`Couldn't play "${track.title}"`, "error");
+    }
   }
 }
 

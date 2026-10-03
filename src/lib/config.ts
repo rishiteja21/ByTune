@@ -13,7 +13,14 @@ export const OAUTH_PROTOCOL = "bytune";
 export const OAUTH_REDIRECT = "bytune://oauth/callback";
 
 /** Local JSON stores replicated to the cloud when signed in. */
-export const SYNCED_STORES = ["library", "settings", "recent-searches", "listening-signals"] as const;
+export const SYNCED_STORES = [
+  "library",
+  "settings",
+  "recent-searches",
+  "listening-signals",
+  "listening-history",
+  "artist-meta-cache",
+] as const;
 
 /**
  * Username namespace that never collides with real email addresses.

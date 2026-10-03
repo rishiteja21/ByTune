@@ -255,15 +255,17 @@ export function TopBar() {
     }
   };
 
-  // Feed refresh — drops the feed's caches and re-orchestrates Home from the
-  // latest listening stats. The icon spins while the rebuild settles, and the
-  // click hops to Home so the refreshed recommendations are actually on screen.
+  // Refresh is route-aware: Home drops its feed caches and re-orchestrates
+  // (its own central mechanism); every other view gets its data lifecycle
+  // re-run in place — App keys the view container on viewReloadNonce, so the
+  // bump remounts the page and its fetch effects, with route and params
+  // untouched. Never navigates: a refresh on Search stays on Search.
   const [feedRefreshing, setFeedRefreshing] = useState(false);
-  const refreshFeed = (): void => {
+  const refreshCurrentView = (): void => {
     if (feedRefreshing) return;
     setFeedRefreshing(true);
-    reloadHomeFeed();
-    goHome();
+    if (view.name === "home") reloadHomeFeed();
+    else useUI.getState().bumpViewReload();
     window.setTimeout(() => setFeedRefreshing(false), 800);
   };
 
@@ -312,9 +314,9 @@ export function TopBar() {
           <ChevronRight className="w-5 h-5" strokeWidth={2.5} />
         </button>
         <button
-          onClick={refreshFeed}
-          title="Refresh recommendations"
-          aria-label="Refresh recommendations"
+          onClick={refreshCurrentView}
+          title="Refresh"
+          aria-label="Refresh"
           className="app-no-drag w-9 h-9 grid place-items-center rounded-full text-ink-hi/60 hover:text-ink-hi hover:bg-ink-hi/[0.08] transition-colors"
         >
           <RefreshCw className={`w-4 h-4 ${feedRefreshing ? "animate-spin" : ""}`} />

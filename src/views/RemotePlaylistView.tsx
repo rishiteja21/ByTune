@@ -154,7 +154,7 @@ export function RemotePlaylistView({ playlistId }: { playlistId: string }) {
       <div className="relative -mx-10 overflow-hidden">
         <div className="absolute inset-0">
           {page.thumb ? (
-            <img src={upgradeArtwork(page.thumb)} alt="" className="w-full h-full object-cover" />
+            <img src={upgradeArtwork(page.thumb, 1200)} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full bg-ink-hi/[0.04] grid place-items-center">
               <ListMusic className="w-12 h-12 text-ink-hi/30" />

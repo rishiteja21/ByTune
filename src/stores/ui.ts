@@ -24,6 +24,15 @@ export interface View {
   param?: string;
 }
 
+/** One history slot: the view plus the content scroll it was left at, so
+    back/forward can put the user exactly where they were (Settings → local
+    folder → back must not land at the top of Settings again). */
+export interface NavEntry {
+  view: View;
+  /** scrollTop of the #view-scroll container when this view was left */
+  scroll: number;
+}
+
 export interface MenuItem {
   label?: string;
   icon?: LucideIcon;
@@ -45,6 +54,8 @@ export interface ContextMenuState {
   items: MenuItem[];
   /** treat y as the BOTTOM edge — the menu opens upward (playbar buttons) */
   above?: boolean;
+  /** treat x as the RIGHT edge — the menu right-aligns to it (settings selects) */
+  alignRight?: boolean;
 }
 
 export interface Toast {
@@ -71,8 +82,11 @@ export interface DialogRequest {
 
 export interface UIState {
   view: View;
-  navPast: View[];
-  navFuture: View[];
+  navPast: NavEntry[];
+  navFuture: NavEntry[];
+  /** Scroll offset to restore into #view-scroll on the next back/forward
+      render — set by goBack/goForward, consumed by App's layout effect. */
+  pendingScroll: number | null;
   searchQuery: string;
   searchFilter: SearchFilter;
   /** Right panel mode: song details (default) or the Queue sheet. */
@@ -93,6 +107,9 @@ export interface UIState {
   /** Bumped by the TopBar refresh button — Home drops its caches and
       re-orchestrates the feed (see lib/recs/feed + lib/recs/profile). */
   homeReloadNonce: number;
+  /** Bumped to re-run the CURRENT view's data lifecycle: App keys the view
+      container on it, so a bump remounts the page and its fetch effects. */
+  viewReloadNonce: number;
 
   navigate(view: View): void;
   goBack(): void;
@@ -104,14 +121,16 @@ export interface UIState {
   toggleNowPlaying(): void;
   setOsFullscreen(fs: boolean): void;
   closePanels(): void;
-  toast(message: string, kind?: Toast["kind"]): void;
+  toast(message: string, kind?: Toast["kind"], duration?: number): void;
   dismissToast(id: number): void;
   setTintThumb(url: string | null): void;
-  openContextMenu(x: number, y: number, items: MenuItem[], options?: { above?: boolean }): void;
+  openContextMenu(x: number, y: number, items: MenuItem[], options?: { above?: boolean; alignRight?: boolean }): void;
   closeContextMenu(): void;
   openDialog(req: DialogRequest): void;
   closeDialog(): void;
   bumpHomeReload(): void;
+  bumpViewReload(): void;
+  clearPendingScroll(): void;
 }
 
 let toastSeq = 1;
@@ -137,10 +156,22 @@ function sameView(a: View, b: View): boolean {
   return a.name === b.name && a.param === b.param;
 }
 
+/** The content scroller lives outside React (App's #view-scroll); the nav
+    stack reads its offset here so every navigate/back/forward site gets
+    scroll memory without each caller passing it along. */
+function readViewScroll(): number {
+  try {
+    return document.getElementById("view-scroll")?.scrollTop ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export const useUI = create<UIState>((set, get) => ({
   view: { name: "home" },
   navPast: [],
   navFuture: [],
+  pendingScroll: null,
   searchQuery: "",
   searchFilter: "all",
   rightPanel: "details" as "details" | "queue",
@@ -152,6 +183,7 @@ export const useUI = create<UIState>((set, get) => ({
   dialog: null,
   tintThumb: null,
   homeReloadNonce: 0,
+  viewReloadNonce: 0,
 
   navigate(view) {
     const { view: current, navPast, lyricsCenter } = get();
@@ -164,7 +196,13 @@ export const useUI = create<UIState>((set, get) => ({
     // not keep covering views the user explicitly navigated to. The wash
     // hover also dies with the pointer's card — React doesn't fire
     // mouseleave on unmount, so clear it here.
-    set({ view, navPast: [...navPast.slice(-40), current], navFuture: [], lyricsCenter: false, tintThumb: null });
+    set({
+      view,
+      navPast: [...navPast.slice(-40), { view: current, scroll: readViewScroll() }],
+      navFuture: [],
+      lyricsCenter: false,
+      tintThumb: null,
+    });
   },
 
   goBack() {
@@ -172,9 +210,10 @@ export const useUI = create<UIState>((set, get) => ({
     const prev = navPast[navPast.length - 1];
     if (!prev) return;
     set({
-      view: prev,
+      view: prev.view,
       navPast: navPast.slice(0, -1),
-      navFuture: [view, ...navFuture.slice(0, 40)],
+      navFuture: [{ view, scroll: readViewScroll() }, ...navFuture.slice(0, 40)],
+      pendingScroll: prev.scroll,
       lyricsCenter: false,
     });
   },
@@ -184,9 +223,10 @@ export const useUI = create<UIState>((set, get) => ({
     const next = navFuture[0];
     if (!next) return;
     set({
-      view: next,
-      navPast: [...navPast, view],
+      view: next.view,
+      navPast: [...navPast, { view, scroll: readViewScroll() }],
       navFuture: navFuture.slice(1),
+      pendingScroll: next.scroll,
       lyricsCenter: false,
     });
   },
@@ -240,7 +280,7 @@ export const useUI = create<UIState>((set, get) => ({
   },
 
   openContextMenu(x, y, items, options) {
-    set({ contextMenu: { x, y, items, above: options?.above } });
+    set({ contextMenu: { x, y, items, above: options?.above, alignRight: options?.alignRight } });
   },
 
   closeContextMenu() {
@@ -257,5 +297,13 @@ export const useUI = create<UIState>((set, get) => ({
 
   bumpHomeReload() {
     set({ homeReloadNonce: get().homeReloadNonce + 1 });
+  },
+
+  bumpViewReload() {
+    set({ viewReloadNonce: get().viewReloadNonce + 1 });
+  },
+
+  clearPendingScroll() {
+    if (get().pendingScroll !== null) set({ pendingScroll: null });
   },
 }));

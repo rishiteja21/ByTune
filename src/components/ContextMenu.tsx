@@ -112,7 +112,9 @@ export function ContextMenu() {
     const w = el?.offsetWidth ?? 230;
     const h = el?.offsetHeight ?? 320;
     setPos({
-      x: Math.max(8, Math.min(menu.x, window.innerWidth - w - 8)),
+      // Right-aligned menus hang off their right edge (x is that edge) —
+      // settings selects drop down under the row's value, select-style.
+      x: Math.max(8, Math.min(menu.alignRight ? menu.x - w : menu.x, window.innerWidth - w - 8)),
       // `above` menus hang from their bottom edge: y is the anchor's top, the
       // panel ends a beat above it — the playbar buttons open this way.
       y: menu.above

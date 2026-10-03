@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  mergeArtistMeta,
   mergeLibrary,
   mergeListening,
   mergeRecentSearches,
@@ -172,4 +173,14 @@ test("sync-meta merge tolerates missing stores maps", () => {
   const merged = mergeSyncMeta({ stores: null }, { stores: undefined, lastUserId: "u" });
   assert.deepEqual(merged.stores, {});
   assert.equal(merged.lastUserId, "u");
+});
+
+test("artist identity merge unions by name with the freshest resolution winning", () => {
+  const local = env({ byName: { "arijit singh": { id: "local-id", thumb: "local.jpg", resolvedAt: 100 } } });
+  const remote = env({ byName: { "arijit singh": { id: "cloud-id", thumb: "cloud.jpg", resolvedAt: 300 }, "the weeknd": { id: "w", thumb: null, resolvedAt: 50 } } });
+  const merged = mergeArtistMeta(local, remote);
+  assert.equal(merged.state.byName["arijit singh"].id, "cloud-id");
+  assert.equal(merged.state.byName["the weeknd"].id, "w");
+  const reversed = mergeArtistMeta(remote, local);
+  assert.equal(reversed.state.byName["arijit singh"].id, "cloud-id", "newest resolution wins regardless of side");
 });

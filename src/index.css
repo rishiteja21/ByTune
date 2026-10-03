@@ -456,6 +456,14 @@ input[type="range"].slider:active::-webkit-slider-thumb {
   opacity: 1;
   transform: scale(1);
 }
+/* Settings sliders (playback speed, crossfade): a numeric value you read at
+   a glance, so the position dot is always on — unlike the play-bar scrubbers
+   that reveal their handle on hover only. */
+input[type="range"].slider.slider-dot::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
 
 /* ---------- floating mini player ---------- */
 /* Native PiP window entrance: a quick fade with a small rise + settle, so

@@ -3,19 +3,21 @@
  * ByTune actually recorded (electron/stats.ts). No fake numbers: an empty
  * period says so.
  */
-import { useEffect, useState } from "react";
-import { Clock3, Disc3, Mic2, Music2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Clock3 } from "lucide-react";
 import { Artwork, EmptyState, ErrorState, Pills } from "../components/primitives";
 import { usePlayer } from "../stores/player";
 import { useUI } from "../stores/ui";
+import { resolveArtistMeta } from "../stores/artistMeta";
+import { useLibrary } from "../stores/library";
 import type { Track } from "../types";
 
 interface Summary {
   totalMs: number;
   plays: number;
   tracks: { id: string; title: string; artist: string; thumb: string; ms: number; plays: number }[];
-  artists: { name: string; ms: number; plays: number }[];
-  albums: { name: string; artist?: string; ms: number; plays: number }[];
+  artists: { name: string; thumb?: string; ms: number; plays: number }[];
+  albums: { name: string; artist?: string; thumb?: string; ms: number; plays: number }[];
   hours: number[];
   days: { date: string; ms: number }[];
   period: string;
@@ -40,14 +42,20 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** Join key for an album row — the same shape the stats buckets use. */
+const albumKey = (al: { name: string; artist?: string }): string =>
+  `${al.name.toLowerCase()}|${(al.artist || "unknown artist").toLowerCase()}`;
+
 export function ReplayView() {
   const [period, setPeriod] = useState<(typeof PERIODS)[number]["key"]>("month");
   const [nonce, setNonce] = useState(0);
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [artistThumbs, setArtistThumbs] = useState<Record<string, string>>({});
   const playQueue = usePlayer((s) => s.playQueue);
   const toast = useUI((s) => s.toast);
+  const { history, liked, playlists } = useLibrary();
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +76,80 @@ export function ReplayView() {
       cancelled = true;
     };
   }, [period, nonce]);
+
+  // Artist photos come from the (cloud-synced) identity cache; names it
+  // doesn't know yet are resolved once and cached for the whole app.
+  useEffect(() => {
+    if (!data) return;
+    let alive = true;
+    void Promise.all(
+      data.artists.slice(0, 10).map(async (a) => {
+        if (a.thumb || artistThumbs[a.name]) return;
+        const meta = await resolveArtistMeta(a.name);
+        if (meta?.thumb && alive && !artistThumbs[a.name]) {
+          setArtistThumbs((prev) => ({ ...prev, [a.name]: meta.thumb as string }));
+        }
+      })
+    );
+    return () => {
+      alive = false;
+    };
+    // artistThumbs intentionally excluded: re-running on our own writes would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  // Album covers for buckets recorded before Replay stored artwork: the
+  // listener's own library already knows what those albums look like.
+  //
+  // Local-file covers (localart://) point at extracted art on THIS machine —
+  // a data reset deletes that folder and a cloud restore can never bring it
+  // back, so such a reference is used only after the file is confirmed present.
+  // Trusting it blindly left every restored local-music album rendering as a
+  // permanently broken image.
+  const albumCandidates = useMemo(() => {
+    const web = new Map<string, string>();
+    const local = new Map<string, string>();
+    for (const t of [...history, ...liked, ...playlists.flatMap((p) => p.tracks)]) {
+      if (!t.album || !t.thumb) continue;
+      const key = albumKey({ name: t.album, artist: t.artist });
+      if (/^(https?:\/\/|data:image\/|blob:)/i.test(t.thumb)) {
+        if (!web.has(key)) web.set(key, t.thumb);
+      } else if (t.thumb.startsWith("localart:") && !local.has(key)) {
+        local.set(key, t.thumb);
+      }
+    }
+    return { web, local };
+  }, [history, liked, playlists]);
+
+  const [presentCovers, setPresentCovers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!data) return;
+    let alive = true;
+    void Promise.all(
+      data.albums.slice(0, 5).map(async (al) => {
+        const key = albumKey(al);
+        if (al.thumb || albumCandidates.web.has(key) || presentCovers[key]) return;
+        const candidate = albumCandidates.local.get(key);
+        if (!candidate) return;
+        try {
+          const art = await window.bytune?.localArtBytes(candidate);
+          if (alive && art?.data) setPresentCovers((prev) => ({ ...prev, [key]: candidate }));
+        } catch {
+          /* the extracted cover is gone — keep the placeholder */
+        }
+      })
+    );
+    return () => {
+      alive = false;
+    };
+    // presentCovers is a cache this pass fills; re-running on it would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, albumCandidates]);
+
+  const albumThumb = (al: Summary["albums"][number]): string => {
+    const key = albumKey(al);
+    return al.thumb || albumCandidates.web.get(key) || presentCovers[key] || "";
+  };
 
   if (error) {
     return <ErrorState title="Replay didn't load" body="Give it another try." onRetry={() => setNonce((n) => n + 1)} />;
@@ -220,9 +302,12 @@ export function ReplayView() {
                 {data.artists.slice(0, 10).map((a, i) => (
                   <div key={a.name} className="flex items-center gap-3">
                     <span className="w-6 text-center text-[13px] font-bold text-ink-faint">{i + 1}</span>
-                    <span className="w-9 h-9 rounded-full bg-ink-hi/[0.07] grid place-items-center shrink-0">
-                      {i === 0 ? <Mic2 className="w-4 h-4 text-ink-dim" /> : <Music2 className="w-4 h-4 text-ink-dim" />}
-                    </span>
+                    <Artwork
+                      src={a.thumb || artistThumbs[a.name] || ""}
+                      className="w-9 h-9 rounded-full shrink-0"
+                      iconClassName="w-4 h-4"
+                      alt=""
+                    />
                     <span className="min-w-0 flex-1 text-[14px] font-semibold text-ink-hi truncate">{a.name}</span>
                     <span className="text-[12.5px] text-ink-faint shrink-0">{fmtHours(a.ms)}</span>
                   </div>
@@ -235,9 +320,12 @@ export function ReplayView() {
                     {data.albums.slice(0, 5).map((al, i) => (
                       <div key={`${al.name}-${i}`} className="flex items-center gap-3">
                         <span className="w-6 text-center text-[13px] font-bold text-ink-faint">{i + 1}</span>
-                        <span className="w-9 h-9 rounded-lg bg-ink-hi/[0.07] grid place-items-center shrink-0">
-                          <Disc3 className="w-4 h-4 text-ink-dim" />
-                        </span>
+                        <Artwork
+                          src={albumThumb(al)}
+                          className="w-9 h-9 rounded-lg shrink-0"
+                          iconClassName="w-4 h-4"
+                          alt=""
+                        />
                         <span className="min-w-0 flex-1">
                           <span className="block text-[14px] font-semibold text-ink-hi truncate">{al.name}</span>
                           <span className="block text-[12.5px] text-ink-dim truncate">{al.artist}</span>

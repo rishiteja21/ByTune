@@ -55,17 +55,6 @@ interface BuildCtx {
   usedAlbums: Set<string>;
 }
 
-const BROWSE_MOODS = [
-  "Today's hits",
-  "Lo-fi beats",
-  "Punjabi hits",
-  "Bollywood 2000s",
-  "Workout energy",
-  "Focus flow",
-  "Rock classics",
-  "Jazz evenings",
-];
-
 /* ---------------------------------------------------------------- helpers */
 
 function takeTracks(
@@ -140,7 +129,7 @@ interface Descriptor {
   build: (ctx: BuildCtx) => HomeSection | null;
 }
 
-function describeFeed(profile: TasteProfile, ytShelves: HomeShelf[] | null, now: number): Descriptor[] {
+function describeFeed(profile: TasteProfile, ytShelves: HomeShelf[] | null, now: number, moods?: string[]): Descriptor[] {
   const list: Descriptor[] = [];
   const top = artistsWithIds(profile).slice(0, 6);
   const maxScore = top[0]?.score ?? 1;
@@ -163,7 +152,10 @@ function describeFeed(profile: TasteProfile, ytShelves: HomeShelf[] | null, now:
   }
 
   /* ---- cold start: browse chips + YouTube's own feed ---- */
-  if (profile.maturity === "cold") {
+  // The chips are the provider's own per-market moods & genres (passed in by
+  // the feed once known). No moods yet → no chips yet: they arrive with the
+  // next paint rather than flashing a hardcoded/fallback list.
+  if (profile.maturity === "cold" && moods && moods.length > 0) {
     list.push({
       id: "browse",
       priority: 90,
@@ -175,7 +167,7 @@ function describeFeed(profile: TasteProfile, ytShelves: HomeShelf[] | null, now:
         layout: "moods",
         priority: 0,
         items: [],
-        moods: BROWSE_MOODS,
+        moods: moods.slice(0, 8),
       }),
     });
   }
@@ -443,9 +435,13 @@ function describeFeed(profile: TasteProfile, ytShelves: HomeShelf[] | null, now:
     });
   }
 
-  /* ---- YouTube's own feed — cold-start filler / long-tail freshness ---- */
+  /* ---- Market shelves (regional charts + YTM's regional feed) — the
+          cold-start mixture and the long-tail filler for thin feeds. Cold
+          and light users get an extra slot: with little personal data yet,
+          market popularity is the honest content they have. ---- */
   if (ytShelves) {
-    ytShelves.slice(0, 2).forEach((shelf, i) => {
+    const slots = profile.maturity === "cold" || profile.maturity === "light" ? 3 : 2;
+    ytShelves.slice(0, slots).forEach((shelf, i) => {
       list.push({
         id: `yt-${i}-${shelf.title}`,
         priority: profile.maturity === "cold" ? 60 - i : 24 - i,
@@ -473,12 +469,14 @@ export function buildHomeSections(args: {
   profile: TasteProfile;
   bundles: Map<string, ArtistBundle>;
   ytShelves: HomeShelf[] | null;
+  /** provider's per-market mood titles for the cold-start Browse chips */
+  moods?: string[];
   now?: number;
 }): HomeSection[] {
-  const { profile, bundles, ytShelves, now = Date.now() } = args;
+  const { profile, bundles, ytShelves, moods, now = Date.now() } = args;
   const ctx: BuildCtx = { profile, bundles, usedTracks: new Set(), usedAlbums: new Set() };
 
-  const descriptors = describeFeed(profile, ytShelves, now).sort((a, b) => b.priority - a.priority);
+  const descriptors = describeFeed(profile, ytShelves, now, moods).sort((a, b) => b.priority - a.priority);
 
   const sections: HomeSection[] = [];
   for (const d of descriptors) {
