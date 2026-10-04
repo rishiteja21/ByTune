@@ -1,8 +1,8 @@
-# ByTune
+# ByTune — YouTube Music desktop app for Windows
 
-![ByTune desktop music player main interface — home feed with Jump back in, library sidebar, now-playing panel and player bar](docs/screenshots/home.png)
+![ByTune YouTube Music desktop app for Windows — home feed with Jump back in, library sidebar, now-playing panel and player bar](docs/screenshots/home.png)
 
-**ByTune is an open-source desktop music player for Windows.** Stream from YouTube Music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native-feeling app.
+**ByTune is a free, open-source YouTube Music desktop app for Windows.** Stream music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native-feeling app.
 
 **[Download](#installation)** · **[Website](https://bytune.vercel.app/)** · **[Releases](https://github.com/rishiteja21/ByTune/releases)** · **[Contributing](CONTRIBUTING.md)** · **[License](#license)**
 
@@ -120,7 +120,27 @@ Streaming quality ceilings, download quality, crossfade and Auto Mix, skip silen
 - **No login required.** Guest mode keeps your data on this PC; accounts are optional.
 - **Free, in the open.** No subscriptions, no locked features, no dark patterns.
 
-ByTune is not affiliated with or endorsed by YouTube/Google.
+## FAQ
+
+**Is ByTune free?**
+
+Yes. It's open source under GPL-3.0, with no subscriptions, no ads and no locked features.
+
+**Does it need a YouTube Music Premium or Google account?**
+
+No. ByTune streams from YouTube Music without logging in — an account is only used if you turn on the optional cloud backup for your library.
+
+**Is this the official YouTube Music app?**
+
+No. ByTune is an independent, open-source desktop player that uses YouTube Music as a streaming source. It is not affiliated with or endorsed by YouTube or Google.
+
+**Which platforms does it run on?**
+
+Windows 10 and 11 (64-bit). macOS support is in the works.
+
+**Can I save songs for offline listening?**
+
+Yes — any track can be downloaded as a `.m4a` file, with your choice of folder and quality.
 
 ## Built with
 
