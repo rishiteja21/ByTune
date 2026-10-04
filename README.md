@@ -4,7 +4,7 @@
 
 **ByTune is a free, open-source YouTube Music desktop app for Windows.** Stream music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native-feeling app.
 
-**[Download](#installation)** · **[Website](https://bytune.vercel.app/)** · **[Releases](https://github.com/rishiteja21/ByTune/releases)** · **[Contributing](CONTRIBUTING.md)** · **[License](#license)**
+**[Download](#installation)** · **[Website](https://bytune.space/)** · **[Releases](https://github.com/rishiteja21/ByTune/releases)** · **[Contributing](CONTRIBUTING.md)** · **[License](#license)**
 
 [![Latest release](https://img.shields.io/github/v/release/rishiteja21/ByTune?label=release&color=a8324a)](https://github.com/rishiteja21/ByTune/releases/latest)
 [![License](https://img.shields.io/github/license/rishiteja21/ByTune?color=a8324a)](LICENSE)
@@ -159,7 +159,7 @@ Yes — any track can be downloaded as a `.m4a` file, with your choice of folder
 - **Windows 10/11 (64-bit)** — grab the installer from the latest release:
   **[Download ByTune-Setup.exe](https://github.com/rishiteja21/ByTune/releases/latest/download/ByTune-Setup.exe)** ← always points at the newest build
 - **macOS** — coming soon
-- Also available on the [website](https://bytune.vercel.app/) and the [releases page](https://github.com/rishiteja21/ByTune/releases)
+- Also available on the [website](https://bytune.space/) and the [releases page](https://github.com/rishiteja21/ByTune/releases)
 
 Run the installer, launch ByTune, and pick **Continue as guest** (data stays on this PC) or create an account for cloud backup.
 
@@ -210,7 +210,7 @@ Please use ByTune responsibly and in accordance with the terms of the services i
 
 ## Links
 
-- Website: <https://bytune.vercel.app/>
+- Website: <https://bytune.space/>
 - Releases: <https://github.com/rishiteja21/ByTune/releases>
 - Latest Windows installer: <https://github.com/rishiteja21/ByTune/releases/latest/download/ByTune-Setup.exe>
 - Architecture deep dive: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
