@@ -8,9 +8,9 @@
  * window's audio engine — the two windows talk through the pip:state /
  * pip:command IPC relay.
  *
- * Sizing follows Spotify's desktop miniplayer measured on a 200%-scale
- * display: a ~300×300 logical-px square with a ~58px metadata bar under the
- * artwork, ~6px art inset, hover-revealed transport and resize grip.
+ * Sizing follows Spotify's desktop MiniPlayer, measured via CDP: a 330×342
+ * logical-px viewport with a 26px top bar, 48px metadata bar, 4px artwork
+ * inset and 8px gaps. Outer window adjusted for the frame (see constants).
  *
  * Closing the PiP only destroys this window — the main window keeps playing.
  */
@@ -63,13 +63,17 @@ export function restrictNavigation(win: BrowserWindow, isPip = false): void {
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 }
 
-/** Spotify-measured compact default (logical px). */
-export const PIP_DEFAULT_W = 300;
-export const PIP_DEFAULT_H = 300;
-const PIP_MIN_W = 260;
-const PIP_MIN_H = 260;
-const PIP_MAX_W = 560;
-const PIP_MAX_H = 560;
+/** Spotify MiniPlayer-measured defaults (logical px). Spotify's viewport is
+ * 330×342; ByTune's frameless window carries ~22px of horizontal and ~11px
+ * of vertical invisible resize frame, so the outer window is sized to land
+ * that viewport. Min/max mirror Spotify's own clamps (253×228 / 569×569
+ * outer) converted through the same frame. */
+export const PIP_DEFAULT_W = 352;
+export const PIP_DEFAULT_H = 353;
+const PIP_MIN_W = 262;
+const PIP_MIN_H = 233;
+const PIP_MAX_W = 578;
+const PIP_MAX_H = 574;
 /** default resting spot: bottom-right of the work area */
 const REST_MARGIN = 16;
 

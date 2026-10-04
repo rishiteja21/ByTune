@@ -2,39 +2,39 @@
  * PipApp — ByTune's native desktop miniplayer (PiP), rendered in its own
  * always-on-top BrowserWindow (`?window=pip`).
  *
- * Visual + behavioural reference: Spotify's desktop miniplayer: a compact
- * square — black outer shell with one hairline edge, artwork up top, a ~58px
- * metadata bar below, a hover-revealed resize grip (bottom right of the
- * whole window), plus ByTune's transport: on hover the artwork gains a
- * Spotify-style black vignette fade while shuffle / prev / play / next /
- * repeat + volume + share surface, with a seek hairline along the
- * artwork's bottom edge.
+ * Hybrid of Spotify's MiniPlayer (measured via CDP against the real app,
+ * 330×342 viewport at 200% scale) and ByTune's own player treatments:
  *
- * TOP BAR: a minimal control layer that floats over the artwork's top edge —
- * six-dot drag handle centered, X close at the right. Invisible when idle;
- * drops in smoothly (200ms ease-out, exit 250ms ease-in) while the artwork
- * slides beneath it (transform only — the image never resizes), retracting
- * when the cursor leaves the upper region. Drag region is scoped to the
- * six-dot pad; the native cursor watch ("pip:cursor-inside") arbitrates the
- * window boundary since renderer pointer events stop over app-regions.
+ *   top bar 26px, auto-hides unless the window is hovered/focused — 6-dot
+ *   grip centred, minimize and close X (12px boxes, right 29 / right 9,
+ *   vertically centred);
+ *   artwork fills the card edge-to-edge (object-cover) inside a 4px frame,
+ *   easing down a few px beneath the dropped bar — transform only, the
+ *   cover never re-crops (ByTune's original presentation);
+ *   the card's background is the artwork's dominant colour (visible while
+ *   the cover loads), blending 0.5s linear between tracks;
+ *   seek (10px grey times + slider over a rise that is solid black at the
+ *   bottom, fading to transparent via black/70) shows on hover
+ *   only, pinned above the metadata bar;
+ *   hover overlay (the card's rect): linear-gradient(rgba(18,18,18,.53) →
+ *   #0a0a0a), opacity 0.3s cubic-bezier(0,0,0.5,1), transport row centred —
+ *   mute (+ horizontal #282828 volume pill 96px wide, radius 12, on hover), shuffle, prev,
+ *   PLAY (48px white circle, black icon, in a 56×48 button), next, repeat,
+ *   copy-link — 32px buttons, 16px icons, #b3b3b3;
+ *   48px metadata bar: ByTune's own 15px/12px title+artist treatment and
+ *   the original 32px like button with its like-burst celebration, floated
+ *   10px above the bottom edge;
+ *   resize grip 9×9 (0.5 strokes) 4px from the corner;
+ *   the whole artwork area is the native drag surface (buttons carve
+ *   no-drag) — exactly Spotify's fixed drag layer.
  *
  * Playback is NOT here. This window holds no audio: it renders snapshots
  * pushed from the main window (pip:state) and sends transport commands back
  * (pip:command). Closing it never touches playback.
  *
- * Window mechanics are native: dragging uses -webkit-app-region scoped to
- * the six-dot pad (the close button opts out with no-drag), resizing uses
- * the frameless window's real resize edges, always-on-top is set in the
- * main process at the "floating" level.
- *
- * Hover zones: the UPPER player zone (top bar + artwork + controls + seek)
- * is ONE continuous hover region driving the top bar and transport —
- * crossings inside it never flicker or retract. The LOWER details zone
- * (title/artist/like) is deliberately outside it, so moving down into the
- * metadata retracts them. The drag pad is a native app-region (invisible to
- * hit-testing): its boundary leave is ignored by pad-band position, and the
- * main process watches the OS cursor ("pip:cursor-inside") to
- * authoritatively hide the bar on real window exits.
+ * Hover mechanics: pointer events stop over the app-region drag surface, so
+ * visibility is driven by the main process's native cursor watch
+ * ("pip:cursor-inside") + keyboard focus — never by per-element listeners.
  */
 import { useEffect, useRef, useState, type ReactNode, type FocusEvent } from "react";
 import { Loader2 } from "lucide-react";
@@ -48,7 +48,6 @@ import {
   SpPrev,
   SpRepeat,
   SpRepeatOne,
-  SpShare,
   SpShuffle,
   SpVolumeHigh,
   SpVolumeOff,
@@ -60,10 +59,14 @@ import type { PipCommand, PipSnapshot } from "./types";
 const dragRegion = { WebkitAppRegion: "drag" } as React.CSSProperties;
 const noDragRegion = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
 
-/** Spotify-scale geometry (logical px). */
-const BAR_H = 58; // metadata bar (68px reduced by 15%)
-const ART_INSET = 6; // frame gap around the artwork card
-const TOP_BAR_H = 26; // dropdown top bar (32px reduced by 20%)
+/** Spotify MiniPlayer geometry (logical px, CDP-measured). */
+const TOP_BAR_H = 26; // dropdown top bar
+const INSET = 4; // frame gap around the artwork card
+/** How far the cover eases down when the panel drops. Spotify's artwork
+ *  barely shifts — its ambient card grows behind a FIXED cover — so the
+ *  motion stays a hint (8px), not a half-cover slide. */
+const COVER_SLIDE = 8;
+const GRADIENT = "linear-gradient(rgba(18, 18, 18, 0.53) 0%, rgb(10, 10, 10) 100%)";
 
 /** like-burst confetti — flight target (--tx/--ty), spin (--rot), size and
     shade of each square in the Spotify-style "added" celebration */
@@ -79,12 +82,33 @@ const LIKE_CONFETTI = [
   { size: 3, color: "#1ed760", tx: -18, ty: -6, rot: 60, delay: 20 },
   { size: 3, color: "#169c46", tx: -11, ty: -14, rot: -45, delay: 0 },
 ];
-/** How long the volume popover lingers after the pointer leaves its region. */
-const VOL_CLOSE_MS = 180;
 
-/** A track is sharable when its id is a YouTube video id (`local:…` file ids have no song link). */
-function sharableId(id: string | null | undefined): boolean {
-  return !!id && !id.includes(":") && !id.includes("/") && !id.includes("\\");
+/** Copy-link glyph — Spotify's exact filled tray-arrow (16px grid). */
+function SpCopyLink({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={className} fill="currentColor" aria-hidden>
+      <path d="M1 5.75A.75.75 0 0 1 1.75 5H4v1.5H2.5v8h11v-8H12V5h2.25a.75.75 0 0 1 .75.75v9.5a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z" />
+      <path d="M8 9.576a.75.75 0 0 0 .75-.75V2.903l1.454 1.454a.75.75 0 0 0 1.06-1.06L8 .03 4.735 3.296a.75.75 0 0 0 1.06 1.061L7.25 2.903v5.923c0 .414.336.75.75.75" />
+    </svg>
+  );
+}
+
+/** 6-dot drag grip — Spotify's exact 4×2 dot field (24px grid). */
+function SpGrip({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M6 13a1 1 0 1 1 0 2 1 1 0 0 1 0-2m0-4a1 1 0 1 1 0 2 1 1 0 0 1 0-2m4 4a1 1 0 1 1 0 2 1 1 0 0 1 0-2m0-4a1 1 0 1 1 0 2 1 1 0 0 1 0-2m4 4a1 1 0 1 1 0 2 1 1 0 0 1 0-2m0-4a1 1 0 1 1 0 2 1 1 0 0 1 0-2m4 4a1 1 0 1 1 0 2 1 1 0 0 1 0-2m0-4a1 1 0 1 1 0 2 1 1 0 0 1 0-2" />
+    </svg>
+  );
+}
+
+/** Close X — Spotify's exact 16px-grid cross. */
+function SpClose({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={className} fill="currentColor" aria-hidden>
+      <path d="M2.47 2.47a.75.75 0 0 1 1.06 0L8 6.94l4.47-4.47a.75.75 0 1 1 1.06 1.06L9.06 8l4.47 4.47a.75.75 0 1 1-1.06 1.06L8 9.06l-4.47 4.47a.75.75 0 0 1-1.06-1.06L6.94 8 2.47 3.53a.75.75 0 0 1 0-1.06" />
+    </svg>
+  );
 }
 
 function send(command: PipCommand): void {
@@ -122,133 +146,31 @@ function IconBtn({
   );
 }
 
-/* ================================= TopBar ================================= */
-/**
- * The PiP's ONE top panel: a black bar that drops down above the artwork's
- * top edge on hover (the card slides beneath it — transform only, never
- * resized) and retracts when the cursor leaves the upper region. Invisible
- * otherwise — no permanent band, no header, no separation line.
- *
- * ARCHITECTURE — drag correctness: Chromium computes native draggable
- * regions from layout boxes and gets them WRONG inside transformed
- * subtrees (offset/skipped), so NO element in the animated shell carries
- * any `app-region` style — the shell is purely decorative. Instead:
- *   strip    — separate UNtransformed sibling with `app-region: drag` +
- *              grab cursor; it stops short of the buttons, so it can never
- *              overlap them and no carve-outs are needed anywhere
- *   buttons  — minimize + close in an UNtransformed container OUTSIDE the
- *              drag region, so OS clicks always land on the buttons
- *
- * (This is why the buttons were previously unclickable: their `no-drag`
- * carve-outs lived inside the transformed shell and never made it into the
- * native drag bitmap, leaving the button area part of the drag region.)
- *
- * Timings per spec: enter 200ms ease-out, exit 250ms ease-in — transform +
- * opacity only (60fps, no layout shift).
- */
-function TopBar({
-  visible,
-  onClose,
-  onMinimize,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onMinimize: () => void;
-}): JSX.Element {
-  return (
-    <div className="group absolute inset-x-0 top-0 z-20" style={{ height: TOP_BAR_H }}>
-      {/* animated black bar — the dropdown panel. Dots + minimize + close all
-          live INSIDE it and drop as one unit. It carries NO app-region styles
-          (Chromium computes native drag regions wrongly inside transformed
-          subtrees) — the native drag strip is the separate untransformed
-          sibling below, which stops short of the buttons, so the buttons stay
-          fully clickable while riding the panel. */}
-      <div
-        className={`relative flex h-full w-full items-center justify-center bg-black transition-[transform,opacity] ${
-          visible
-            ? "translate-y-0 opacity-100 duration-200 ease-out"
-            : "pointer-events-none -translate-y-full opacity-0 duration-[250ms] ease-in"
-        }`}
-      >
-        {/* 2×3 grip dots — brighten while the top bar is hovered */}
-        <div aria-hidden className="grid grid-cols-3 gap-[3px]">
-          {Array.from({ length: 6 }, (_, i) => (
-            <span
-              key={i}
-              className="h-[2px] w-[2px] rounded-full bg-white/60 transition-colors duration-150 group-hover:bg-white/90"
-            />
-          ))}
-        </div>
-        {/* minimize + close — inside the dropdown panel; no drag region
-            overlaps them (the strip ends before them), so OS clicks always
-            land on the buttons. Minimize minimizes ONLY this window
-            (playback + main window untouched); close destroys ONLY this
-            window (playback continues). */}
-        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-          <button
-            type="button"
-            onClick={onMinimize}
-            title="Minimize miniplayer"
-            aria-label="Minimize miniplayer"
-            className="grid h-6 w-6 cursor-pointer place-items-center rounded-full text-white transition-colors duration-150 hover:bg-white/10 active:scale-95"
-          >
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <path d="M4 8h8" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Close miniplayer"
-            aria-label="Close miniplayer"
-            className="grid h-6 w-6 cursor-pointer place-items-center rounded-full text-white transition-colors duration-150 hover:bg-white/10 active:scale-95"
-          >
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
-          </button>
-        </div>
-      </div>
-      {/* native drag strip — UNtransformed sibling; `app-region: drag` +
-          grab cursor sit on exactly this box, which ends before the buttons
-          so the buttons can never be swallowed by the drag region. Inert
-          while hidden so artwork clicks pass through. */}
-      <div
-        style={dragRegion}
-        title="Drag to move"
-        className={`absolute left-0 top-0 h-full cursor-grab active:cursor-grabbing ${
-          visible ? "right-[64px]" : "pointer-events-none right-0"
-        }`}
-      />
-    </div>
-  );
+/** A track is sharable when its id is a YouTube video id (`local:…` file ids have no song link). */
+function sharableId(id: string | null | undefined): boolean {
+  return !!id && !id.includes(":") && !id.includes("/") && !id.includes("\\");
 }
 
 export function PipApp() {
   const [snap, setSnap] = useState<PipSnapshot | null>(null);
-  /** pointer inside the UPPER player zone (top bar + artwork + controls +
-      seek) — ONE continuous region that drives the top bar and transport */
-  const [artHover, setArtHover] = useState(false);
   /** native cursor watch (main process): true while the OS pointer is over
-      the PiP window. Renderer pointer events stop over the app-region drag
-      pad, so the main process arbitrates the inside/outside boundary. */
+      the PiP window. Pointer events stop over the drag surface, so the main
+      process arbitrates inside/outside — Spotify's model exactly. */
   const [cursorInside, setCursorInside] = useState(true);
   const [focusWithin, setFocusWithin] = useState(false);
   const [volOpen, setVolOpen] = useState(false);
   const volTimer = useRef<number | null>(null);
-  const [shareHover, setShareHover] = useState(false);
-  /** copy feedback shown in the share tooltip */
-  const [shareMsg, setShareMsg] = useState<"copied" | "failed" | null>(null);
-  const shareTimer = useRef<number | null>(null);
   /** Spotify-style like-burst overlay (set when adding, self-clears) */
   const [likeBurst, setLikeBurst] = useState(false);
   const likeBurstTimer = useRef<number | null>(null);
   /** While the seek thumb is held down, the drag is purely visual: snapshots
-      pushed from the main window must not fight the thumb mid-drag (the main
-      window's own SeekBar works the same way). The seek command is sent once,
-      on release. */
+      pushed from the main window must not fight the thumb mid-drag. The seek
+      command is sent once, on release. */
   const [seekValue, setSeekValue] = useState<number | null>(null);
+  /** dominant colour of the current artwork — the card's loading backdrop */
+  const [ambient, setAmbient] = useState("#282828");
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const zoneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const off = window.bytune?.onPipState((s) => setSnap(s as PipSnapshot));
@@ -271,12 +193,9 @@ export function PipApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /* The OS window is square but the shell is rounded — outside the 12px
-     radius sit the window's four corner squares and the Win11-rounded window
-     edge. The body's theme background (`bg-base`, a dark grey) would show
-     there as a grey arc around the corners, so the PiP route pins the
-     document background to pure black: corner squares, shell and window
-     edge all read as one solid black rounded panel. */
+  /* The OS window's corners are rounded by the OS itself; the shell stays
+     square and black so shell, corner squares and window edge all read as
+     one solid black panel (Spotify does the same). */
   useEffect(() => {
     document.documentElement.style.background = "#000";
     document.body.style.background = "#000";
@@ -288,49 +207,81 @@ export function PipApp() {
   }, []);
 
   // A new track resets any in-progress visual drag.
-  const seekTrackId = snap?.track?.id ?? null;
-  useEffect(() => setSeekValue(null), [seekTrackId]);
+  const track = snap?.track ?? null;
+  const trackId = track?.id ?? null;
+  const thumb = track?.thumb ? upgradeArtwork(track.thumb) : "";
+  useEffect(() => setSeekValue(null), [trackId]);
 
-  /* The pointer can leave the window without the renderer ever seeing it
-     (exits over the app-region drag pad fire no events), which would leave
-     artHover stuck true. The native watch is authoritative for "outside". */
+  /* Dominant artwork colour for the card's backdrop (visible while the cover
+     loads): 48px canvas readback, 4-bit/channel quantisation, best bucket by
+     count weighted toward saturation. Cross-origin readback can fail (file
+     thumbs) — the previous neutral stays. */
   useEffect(() => {
-    if (!cursorInside) setArtHover(false);
-  }, [cursorInside]);
-
-  /* Scale the transport buttons with the native window size: 1.0 at the
-     300px default, shrinking toward the 260px minimum so the row keeps its
-     edge padding instead of crowding the artwork, growing (capped) on large
-     windows. Written straight to the DOM — no re-render churn mid-resize. */
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const apply = (): void => {
-      const w = el.getBoundingClientRect().width || 300;
-      const s = Math.min(1.3, Math.max(0.8, w / 300));
-      el.style.setProperty("--pip-s", s.toFixed(3));
+    if (!thumb) {
+      setAmbient("#282828");
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const c = document.createElement("canvas");
+        c.width = 48;
+        c.height = 48;
+        const ctx = c.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, 48, 48);
+        const data = ctx.getImageData(0, 0, 48, 48).data;
+        const buckets = new Map<number, { n: number; r: number; g: number; b: number }>();
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+          const e = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+          e.n++;
+          e.r += r;
+          e.g += g;
+          e.b += b;
+          buckets.set(key, e);
+        }
+        let best: { n: number; r: number; g: number; b: number } | null = null;
+        let bestScore = -1;
+        for (const e of buckets.values()) {
+          const mx = Math.max(e.r, e.g, e.b) / e.n;
+          const mn = Math.min(e.r, e.g, e.b) / e.n;
+          const sat = mx === 0 ? 0 : (mx - mn) / mx;
+          const score = e.n * (0.3 + sat);
+          if (score > bestScore) {
+            bestScore = score;
+            best = e;
+          }
+        }
+        if (!best || best.n === 0) return;
+        setAmbient(`rgb(${Math.round(best.r / best.n)},${Math.round(best.g / best.n)},${Math.round(best.b / best.n)})`);
+      } catch {
+        /* tainted canvas — keep the current ambient */
+      }
     };
-    apply();
-    const ro = new ResizeObserver(apply);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    img.src = thumb;
+    return () => {
+      cancelled = true;
+    };
+  }, [thumb]);
 
   useEffect(
     () => () => {
       if (volTimer.current !== null) window.clearTimeout(volTimer.current);
-      if (shareTimer.current !== null) window.clearTimeout(shareTimer.current);
       if (likeBurstTimer.current !== null) window.clearTimeout(likeBurstTimer.current);
     },
     []
   );
 
-  /** upper-region hover (top bar + artwork + controls + seek = ONE region),
-      gated by the native cursor watch so it always drops when the pointer
-      leaves the PiP; keyboard focus keeps it reachable regardless */
-  const expanded = (artHover && cursorInside) || focusWithin;
-  const track = snap?.track ?? null;
-  const trackId = track?.id ?? null;
+  /** Spotify shows bar + transport whenever the cursor is over the window
+      (native watch) or the window holds keyboard focus. */
+  const expanded = cursorInside || focusWithin;
   const playing = snap?.playing ?? false;
   const buffering = snap?.buffering ?? false;
   const duration = snap?.duration ?? 0;
@@ -342,8 +293,7 @@ export function PipApp() {
     send({ type: "seek", sec: Math.min(seekValue, max) });
     setSeekValue(null);
   };
-  const thumb = track?.thumb ? upgradeArtwork(track.thumb) : "";
-  const canShare = sharableId(trackId);
+  const canShare = sharableId(track?.id ?? null);
 
   const onCardFocus = (e: FocusEvent<HTMLDivElement>): void => {
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(true);
@@ -352,11 +302,7 @@ export function PipApp() {
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
   };
 
-  /* ------------------------- volume popover ------------------------- */
-  /** The button + slider are ONE hover region: the popover bridges to the
-      button with padding (never margin), so crossing from one to the other
-      never crosses dead space that would fire mouseleave. A short linger on
-      exit keeps fast crossings reliable without ever pinning it open. */
+  /* volume popover: one hover/focus region with a short linger on exit */
   const openVol = (): void => {
     if (volTimer.current !== null) {
       window.clearTimeout(volTimer.current);
@@ -369,20 +315,15 @@ export function PipApp() {
     volTimer.current = window.setTimeout(() => {
       volTimer.current = null;
       setVolOpen(false);
-    }, VOL_CLOSE_MS);
+    }, 180);
   };
 
-  /* ------------------------------ share ------------------------------ */
-  /** Copies the current song's real link (the same `music.youtube.com`
-      scheme the main app's "Copy link" uses) with a clipboard-API fallback
-      for contexts where it is unavailable. */
+  /* copy the song link (clipboard API with a textarea fallback) */
   const copyShareLink = async (): Promise<void> => {
     if (!track || !canShare) return;
     const url = `https://music.youtube.com/watch?v=${track.id}`;
-    let ok = false;
     try {
       await navigator.clipboard.writeText(url);
-      ok = true;
     } catch {
       try {
         const ta = document.createElement("textarea");
@@ -391,20 +332,13 @@ export function PipApp() {
         ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
         document.body.appendChild(ta);
         ta.select();
-        ok = document.execCommand("copy");
+        document.execCommand("copy");
         ta.remove();
       } catch {
-        ok = false;
+        /* clipboard unavailable */
       }
     }
-    setShareMsg(ok ? "copied" : "failed");
-    if (shareTimer.current !== null) window.clearTimeout(shareTimer.current);
-    shareTimer.current = window.setTimeout(() => {
-      shareTimer.current = null;
-      setShareMsg(null);
-    }, 1600);
   };
-  const shareTip = shareMsg === "copied" ? "Copied!" : shareMsg === "failed" ? "Couldn't copy" : "Copy link to Song";
 
   const reveal = (extra = ""): string =>
     `${extra} transition-all duration-200 ease-[cubic-bezier(0.2,0.8,0.3,1)] ${
@@ -416,55 +350,35 @@ export function PipApp() {
       ref={rootRef}
       onFocus={onCardFocus}
       onBlur={onCardBlur}
+      onPointerEnter={() => setCursorInside(true)}
       onContextMenu={(e) => e.preventDefault()}
-      className="animate-pip-in fixed inset-0 flex select-none flex-col overflow-hidden rounded-[12px] bg-black text-white"
+      className="animate-pip-in fixed inset-0 flex select-none flex-col overflow-hidden bg-black text-white"
     >
-      {/* ONE subtle outer edge — the window's single visual boundary, clipped
-          to the same radius as the shell so no second line ever shows. */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 z-50 rounded-[12px] border border-white/[0.07]" />
-
       {/* ------------------------- upper player zone ------------------------- */}
-      {/* ONE continuous hover region: the top bar, artwork, controls and seek
-          all live in here, so crossing between them never retracts the bar.
-          The metadata bar below stays outside — sliding into the song details
-          retracts the bar instead of pinning it open. overflow-hidden clips
-          the artwork card when it slides beneath the dropped bar (the card
-          itself never resizes — transform only). pointerleave from the drag
-          pad (a native app-region, invisible to hit-testing) fires with a
-          null native relatedTarget at the pad band and is IGNORED — the
-          native cursor watch is the backstop for real window exits. */}
-      <div
-        className="relative min-h-0 flex-1 overflow-hidden"
-        style={{ padding: `${ART_INSET}px ${ART_INSET}px 0` }}
-        onPointerEnter={() => {
-          // A zone enter proves the OS pointer is over the window — mark the
-          // native watch true immediately so re-entry never waits a tick.
-          setCursorInside(true);
-          setArtHover(true);
-        }}
-        onPointerLeave={(e) => {
-          // React rewrites `relatedTarget` on its synthetic enter/leave
-          // events (it becomes a node even when the native one is null), so
-          // the drag-pad check MUST read the native event: crossing into the
-          // app-region pad arrives as a boundary leave with a null native
-          // relatedTarget at the pad band — that is NOT a real exit, so it
-          // is ignored (the native cursor watch still hides the bar if the
-          // pointer truly leaves the window through the pad).
-          const native = e.nativeEvent as PointerEvent;
-          if (native.relatedTarget === null && native.clientY <= TOP_BAR_H + 2) return;
-          setArtHover(false);
-        }}
-      >
-        {/* the artwork card — slides down beneath the dropped bar (transform
-            only: the image keeps its exact rendered size, never re-crops),
-            landing flush below it with its rounded top corners visible; the
-            tucked-under bottom clips at the zone edge. Enter/exit timings
-            mirror the bar's so they move as one piece. */}
+      {/* Everything above the metadata bar. Native drag surface first: the
+          whole area drags the window exactly like Spotify's fixed drag layer
+          — interactive elements carve no-drag. Pointer events never fire
+          over the drag surface; visibility runs off the native cursor
+          watch + focus (see `expanded`). overflow-hidden clips the bar's
+          hidden state above the window and the cover's tucked bottom. */}
+      <div ref={zoneRef} className="relative min-h-0 flex-1 overflow-hidden">
+        <div aria-hidden className="absolute inset-0" style={dragRegion} />
+
+        {/* the cover — fills the card edge-to-edge and slides 22px beneath
+            the dropped bar (transform only: the image keeps its exact
+            rendered size, never re-crops; the tucked bottom clips at the
+            zone edge). The layer must NOT carry app-regions: drag carve-outs
+            inside a transformed subtree are placed wrong by Chromium, so
+            every app-region lives outside this layer. */}
         <div
-          className={`relative h-full w-full overflow-hidden rounded-[10px] bg-black transition-transform ${
-            expanded ? "translate-y-[20px] duration-200 ease-out" : "translate-y-0 duration-[250ms] ease-in"
+          className={`absolute left-[4px] right-[4px] top-[4px] overflow-hidden rounded-[8px] transition-transform ${
+            expanded ? "duration-200 ease-out" : "duration-[250ms] ease-in"
           }`}
-          style={{ transform: expanded ? `translateY(${TOP_BAR_H - ART_INSET}px)` : "translateY(0px)" }}
+          style={{
+            height: `calc(100% - ${INSET}px)`,
+            transform: expanded ? `translateY(${TOP_BAR_H - INSET}px)` : "translateY(0px)",
+            backgroundColor: ambient,
+          }}
         >
           {thumb ? (
             <img
@@ -472,37 +386,34 @@ export function PipApp() {
               src={thumb}
               alt=""
               draggable={false}
-              className="animate-art-in absolute inset-0 h-full w-full object-cover"
+              className="animate-art-in h-full w-full object-cover"
             />
           ) : (
-            <div key={trackId ?? "none"} className="animate-art-in absolute inset-0 grid place-items-center">
+            <div key={trackId ?? "none"} className="animate-art-in grid h-full w-full place-items-center">
               <SpCoverNote className="h-12 w-12 text-white/25" />
             </div>
           )}
+        </div>
 
-          {/* Spotify-style black fade over the art on hover — a radial
-              vignette darkening the edges plus a bottom-up linear fade,
-              pointer-transparent so it can never swallow drags, hovers or
-              clicks; controls sit above it */}
+        {/* hover transport overlay — Spotify's gradient over the card.
+            Sits at the card's EXPANDED geometry (fixed, untransformed) so
+            its no-drag carve-outs track real layout. */}
+        <div
+          aria-hidden={!expanded}
+          className={`absolute bottom-0 left-[4px] right-[4px] rounded-[8px] transition-opacity duration-300 ease-[cubic-bezier(0,0,0.5,1)] ${
+            expanded ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+          style={{ top: TOP_BAR_H, backgroundImage: GRADIENT }}
+        >
           <div
-            aria-hidden
-            className={`pointer-events-none absolute inset-0 z-[5] transition-opacity duration-300 ease-out ${
-              expanded ? "opacity-100" : "opacity-0"
-            }`}
-            style={{
-              backgroundImage:
-                "radial-gradient(120% 90% at 50% 45%, rgba(0,0,0,0) 35%, rgba(0,0,0,0.55) 100%), linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.28) 45%, rgba(0,0,0,0.35) 100%)",
-            }}
-          />
-
-          {/* hover transport */}
-          <div
-            className={`absolute inset-0 z-10 flex items-center justify-center ${reveal()}`}
+            className={`absolute inset-0 flex items-center justify-center ${reveal()}`}
             onClick={() => send({ type: "toggle" })}
-            aria-hidden={!expanded}
           >
-            <div className="pip-controls flex items-center justify-center gap-[2px] px-1" onClick={(e) => e.stopPropagation()}>
-              {/* volume + popover — one hover region, padding-bridged */}
+            <div
+              className="pip-controls flex items-center justify-center gap-[2px] px-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* volume + vertical popover — one hover region, bridged */}
               <div
                 className="relative"
                 onMouseEnter={openVol}
@@ -519,14 +430,15 @@ export function PipApp() {
                     {snap?.muted ? <SpVolumeOff /> : <SpVolumeHigh />}
                   </span>
                 </IconBtn>
-                {/* bridge: pb-2 keeps the pointer inside this wrapper while
-                    crossing from button to slider — no margin gap to fall
-                    through and no mouseleave mid-crossing. Left-anchored so
-                    the popover never clips the card's left edge. */}
+                {/* git-version hover design: horizontal pill, left-anchored
+                    so it never clips the card edge; pb-2 bridges the pointer
+                    gap while crossing button → slider. The no-drag carve-out
+                    keeps the slider clickable over the drag surface. */}
                 <div
                   className={`absolute bottom-full left-0 pb-2 transition-all duration-150 ease-[cubic-bezier(0.2,0.8,0.3,1)] ${
                     volOpen && expanded ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-1 opacity-0"
                   }`}
+                  style={noDragRegion}
                 >
                   <div className="w-[96px] rounded-xl bg-[#282828] px-2.5 py-2 shadow-elev">
                     <input
@@ -577,46 +489,20 @@ export function PipApp() {
               >
                 {snap?.repeat === "one" ? <SpRepeatOne /> : <SpRepeat />}
               </IconBtn>
-
-              {/* share — rightmost, Spotify-style; tooltip bridges like volume */}
-              <div
-                className="relative"
-                onMouseEnter={() => setShareHover(true)}
-                onMouseLeave={() => setShareHover(false)}
-              >
-                <button
-                  type="button"
-                  style={noDragRegion}
-                  onClick={() => void copyShareLink()}
-                  disabled={!canShare}
-                  aria-label="Share — copy link to song"
-                  className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-white/90 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90 disabled:pointer-events-none disabled:opacity-40 focus-visible:text-white"
-                >
-                  <SpShare />
-                </button>
-                <div
-                  aria-hidden={!(shareHover || shareMsg)}
-                  className={`absolute bottom-full right-0 pb-2 transition-all duration-150 ease-[cubic-bezier(0.2,0.8,0.3,1)] ${
-                    (shareHover || shareMsg) && expanded
-                      ? "translate-y-0 opacity-100"
-                      : "pointer-events-none translate-y-1 opacity-0"
-                  }`}
-                >
-                  <div className="whitespace-nowrap rounded-lg bg-[#282828] px-3 py-2 text-[13px] font-medium text-white shadow-elev">
-                    {shareTip}
-                  </div>
-                </div>
-              </div>
+              <IconBtn onClick={() => void copyShareLink()} disabled={!canShare} title="Copy link to Song">
+                <SpCopyLink className="h-4 w-4" />
+              </IconBtn>
             </div>
           </div>
-
         </div>
 
-        {/* seek hairline — pinned to the zone's bottom edge (NOT inside the
-            sliding card) so it stays right above the metadata bar in both
-            states; hover only */}
+        {/* seek — hover only, pinned above the metadata bar (old treatment):
+            10px grey times flanking the slider over a rise that is solid
+            black at the bottom (artwork must not bleed through) fading to
+            transparent via black/70 */}
         <div
-          className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 to-transparent px-3 pb-2 pt-5 ${reveal()}`}
+          className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black via-black/70 to-transparent px-3 pb-2 pt-5 ${reveal()}`}
+          style={noDragRegion}
           onClick={(e) => e.stopPropagation()}
           aria-hidden={!expanded}
         >
@@ -647,29 +533,53 @@ export function PipApp() {
           </div>
         </div>
 
-        {/* THE top bar — the one and only top panel (see TopBar above).
-            Drops over the artwork's top edge on upper-region hover while the
-            card slides beneath it; retracts on leave; the cover never
-            resizes. */}
-        <TopBar
-          visible={expanded}
-          onClose={() => window.bytune?.pipClose()}
-          onMinimize={() => window.bytune?.pipMinimize()}
-        />
+        {/* top bar — 26px, drops when the cursor is over the window / the
+            window is focused; sits 1px down so it laps the cover's top edge
+            instead of meeting it flush. The close button carves no-drag out
+            of the drag surface. */}
+        <div className="absolute inset-x-0 top-[1px] z-20 h-[26px]">
+          <div
+            className={`relative flex h-full w-full items-center justify-center bg-black transition-[transform,opacity] ${
+              expanded ? "translate-y-0 opacity-100 duration-200 ease-out" : "pointer-events-none -translate-y-full opacity-0 duration-[250ms] ease-in"
+            }`}
+          >
+            <SpGrip className="h-6 w-6 text-[#b3b3b3]" />
+            <button
+              type="button"
+              style={noDragRegion}
+              onClick={() => window.bytune?.pipMinimize()}
+              title="Minimize miniplayer"
+              aria-label="Minimize miniplayer"
+              className="absolute right-[29px] top-[7px] grid h-3 w-3 cursor-pointer place-items-center rounded-full text-white transition-colors duration-150 hover:bg-white/10 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                {/* span matches one X stick's tip-to-tip reach (2.47→13.53
+                    incl. round caps) so the minus reads as wide as the X */}
+                <path d="M3.27 8h9.46" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              style={noDragRegion}
+              onClick={() => window.bytune?.pipClose()}
+              title="Close miniplayer"
+              aria-label="Close miniplayer"
+              className="absolute right-[9px] top-[7px] grid h-3 w-3 cursor-pointer place-items-center rounded-full text-white transition-colors duration-150 hover:bg-white/10 active:scale-95"
+            >
+              <SpClose className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ------------------------- metadata bar ------------------------- */}
-      {/* LOWER details zone — deliberately NOT part of the upper hover
-          region: moving into it retracts the top bar. Opaque + stacked above
-          the zone so the artwork tucks beneath it while the bar is dropped. */}
-      <div className="relative z-10 flex shrink-0 items-center gap-1 bg-black pl-4 pr-2" style={{ height: BAR_H }}>
+      {/* floats a 10px gap above the bottom edge instead of sitting flush */}
+      <div className="relative z-10 mx-2 mb-[10px] flex h-12 shrink-0 items-center gap-1">
         <button
           type="button"
-          style={noDragRegion}
           onClick={() => window.bytune?.pipShowMain()}
           title="Open ByTune"
-          aria-label="Open ByTune"
-          className="min-w-0 flex-1 text-left"
+          className="min-w-0 flex-1 cursor-pointer text-left"
         >
           <div key={trackId ?? "t"} className="animate-meta-in truncate text-[15px] font-semibold leading-[1.35] text-white">
             {track ? track.title : "Nothing playing"}
@@ -696,7 +606,7 @@ export function PipApp() {
             title={snap?.liked ? "Edit Liked Songs" : "Save to your library"}
             aria-label={snap?.liked ? "Remove from Liked Songs" : "Save to Liked Songs"}
             aria-pressed={snap?.liked}
-            className="relative grid h-8 w-8 shrink-0 place-items-center rounded-full transition-transform duration-150 hover:scale-105 active:scale-90"
+            className="relative grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full transition-transform duration-150 hover:scale-105 active:scale-90"
           >
             <span key={snap?.liked ? "liked" : "unliked"} className="icon-swap">
               {snap?.liked ? (
@@ -746,12 +656,12 @@ export function PipApp() {
         )}
       </div>
 
-      {/* resize hint — owned by the OUTER window corner (never the artwork).
-          Purely visual: frameless resizing is the window's native edges, so
-          this stays pointer-transparent and can never block real controls. */}
-      <div aria-hidden className="pointer-events-none absolute bottom-[3px] right-[3px] z-40">
-        <svg viewBox="0 0 10 10" className="h-2.5 w-2.5 opacity-70">
-          <path d="M10 0 0 10 M10 4 4 10 M10 8 8 10" stroke="white" strokeWidth={1} strokeLinecap="round" fill="none" />
+      {/* resize grip — Spotify's 9×9 double-line mark, 4px from the corner.
+          Purely visual: frameless resizing is the window's native edges. */}
+      <div aria-hidden className="pointer-events-none absolute bottom-[4px] right-[4px] text-[#b3b3b3]">
+        <svg viewBox="0 0 9 9" width="9" height="9" fill="none">
+          <line x1="0.823223" y1="8.82322" x2="8.82322" y2="0.823223" stroke="currentColor" strokeWidth="0.5" />
+          <line x1="4.82322" y1="8.82322" x2="8.82322" y2="4.82322" stroke="currentColor" strokeWidth="0.5" />
         </svg>
       </div>
     </div>
