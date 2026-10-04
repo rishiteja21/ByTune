@@ -574,7 +574,8 @@ function LibraryPill() {
 
   /** Right-click the library panel itself — Spotify's create menu. Rows stop
       propagation so they keep their own menus; everywhere else (header, empty
-      space) offers playlist/folder creation. */
+      space) offers playlist/folder creation, each asking for a name first so
+      nothing empty lands in the library. */
   const onLibraryContextMenu = (e: React.MouseEvent): void => {
     e.preventDefault();
     openContextMenu(e.clientX, e.clientY, [
@@ -582,18 +583,36 @@ function LibraryPill() {
         label: "Create playlist",
         icon: ListPlus,
         action: () => {
-          const lib = useLibrary.getState();
-          const p = lib.createPlaylist(`My Playlist #${lib.playlists.length + 1}`);
-          navigate({ name: "playlist", param: p.id });
+          const suggested = `My Playlist #${useLibrary.getState().playlists.length + 1}`;
+          openDialog({
+            title: "New playlist",
+            body: "Give your playlist a name.",
+            initialValue: suggested,
+            placeholder: "Playlist name",
+            confirmLabel: "Create",
+            onConfirm: (value) => {
+              const p = useLibrary.getState().createPlaylist(value.trim() || suggested);
+              navigate({ name: "playlist", param: p.id });
+            },
+          });
         },
       },
       {
         label: "Create folder",
         icon: Folder,
         action: () => {
-          const lib = useLibrary.getState();
-          const f = lib.createFolder(`New Folder ${lib.folders.length + 1}`);
-          setExpanded((prev) => new Set(prev).add(f.id));
+          const suggested = `New Folder ${useLibrary.getState().folders.length + 1}`;
+          openDialog({
+            title: "New folder",
+            body: "Give your folder a name.",
+            initialValue: suggested,
+            placeholder: "Folder name",
+            confirmLabel: "Create",
+            onConfirm: (value) => {
+              const f = useLibrary.getState().createFolder(value.trim() || suggested);
+              setExpanded((prev) => new Set(prev).add(f.id));
+            },
+          });
         },
       },
     ]);

@@ -172,10 +172,22 @@ export function PlayerBar() {
             label: "New playlist",
             icon: ListPlus,
             action: () => {
-              const count = lib.playlists.length;
-              const playlist = useLibrary.getState().createPlaylist(`Playlist ${count + 1}`);
-              useLibrary.getState().addToPlaylist(playlist.id, track);
-              useUI.getState().navigate({ name: "playlist", param: playlist.id });
+              // Name it before it exists — cancel adds nothing. Blank
+              // confirm keeps the numbered default.
+              const suggested = `Playlist ${useLibrary.getState().playlists.length + 1}`;
+              useUI.getState().openDialog({
+                title: "New playlist",
+                body: `Add "${track.title}" to a new playlist.`,
+                initialValue: suggested,
+                placeholder: "Playlist name",
+                confirmLabel: "Create",
+                onConfirm: (value) => {
+                  const fresh = useLibrary.getState();
+                  const playlist = fresh.createPlaylist(value.trim() || suggested);
+                  fresh.addToPlaylist(playlist.id, track);
+                  useUI.getState().navigate({ name: "playlist", param: playlist.id });
+                },
+              });
             },
           },
         ],

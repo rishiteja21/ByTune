@@ -1,9 +1,11 @@
 /**
  * CreateMenu — the library "+" trigger and its Spotify-style dropdown:
- * Playlist and Folder (deliberately no Blend). The menu is portal'd to
- * <body> because the library pill clips absolutely-positioned children,
- * and outside-mousedown closes it while honouring both the trigger ref
- * and the portal'd menu ref.
+ * Playlist and Folder (deliberately no Blend). Picking one asks for a name
+ * first (the shared dialog, pre-filled with the numbered default) — nothing
+ * is created until the name is confirmed, so cancel means no empty entry.
+ * The menu is portal'd to <body> because the library pill clips
+ * absolutely-positioned children, and outside-mousedown closes it while
+ * honouring both the trigger ref and the portal'd menu ref.
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -12,10 +14,6 @@ import { useLibrary, type LibraryFolder } from "../stores/library";
 import { useUI } from "../stores/ui";
 
 export function CreateMenu({ onFolderCreated }: { onFolderCreated?: (folder: LibraryFolder) => void }) {
-  const playlistCount = useLibrary((s) => s.playlists.length);
-  const folderCount = useLibrary((s) => s.folders.length);
-  const createPlaylist = useLibrary((s) => s.createPlaylist);
-  const createFolder = useLibrary((s) => s.createFolder);
   const navigate = useUI((s) => s.navigate);
 
   const [open, setOpen] = useState(false);
@@ -63,15 +61,37 @@ export function CreateMenu({ onFolderCreated }: { onFolderCreated?: (folder: Lib
   };
 
   const newPlaylist = (): void => {
-    const p = createPlaylist(`My Playlist #${playlistCount + 1}`);
     setOpen(false);
-    navigate({ name: "playlist", param: p.id });
+    // Fresh state, not the render-time count — the menu may have sat open
+    // while other entries appeared. Blank confirm keeps the default name.
+    const suggested = `My Playlist #${useLibrary.getState().playlists.length + 1}`;
+    useUI.getState().openDialog({
+      title: "New playlist",
+      body: "Give your playlist a name.",
+      initialValue: suggested,
+      placeholder: "Playlist name",
+      confirmLabel: "Create",
+      onConfirm: (value) => {
+        const p = useLibrary.getState().createPlaylist(value.trim() || suggested);
+        navigate({ name: "playlist", param: p.id });
+      },
+    });
   };
 
   const newFolder = (): void => {
-    const f = createFolder(`New Folder ${folderCount + 1}`);
     setOpen(false);
-    onFolderCreated?.(f);
+    const suggested = `New Folder ${useLibrary.getState().folders.length + 1}`;
+    useUI.getState().openDialog({
+      title: "New folder",
+      body: "Give your folder a name.",
+      initialValue: suggested,
+      placeholder: "Folder name",
+      confirmLabel: "Create",
+      onConfirm: (value) => {
+        const f = useLibrary.getState().createFolder(value.trim() || suggested);
+        onFolderCreated?.(f);
+      },
+    });
   };
 
   return (

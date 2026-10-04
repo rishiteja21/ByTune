@@ -70,10 +70,22 @@ export function trackMenuItems(track: Track): MenuItem[] {
     label: "New playlist…",
     icon: ListMusic,
     action: () => {
-      const count = useLibrary.getState().playlists.length;
-      const playlist = useLibrary.getState().createPlaylist(`Playlist ${count + 1}`);
-      useLibrary.getState().addToPlaylist(playlist.id, track);
-      useUI.getState().navigate({ name: "playlist", param: playlist.id });
+      // Name it before it exists — cancel creates nothing and the track
+      // stays where it was. Blank confirm keeps the numbered default.
+      const suggested = `Playlist ${useLibrary.getState().playlists.length + 1}`;
+      useUI.getState().openDialog({
+        title: "New playlist",
+        body: `Add "${track.title}" to a new playlist.`,
+        initialValue: suggested,
+        placeholder: "Playlist name",
+        confirmLabel: "Create",
+        onConfirm: (value) => {
+          const lib = useLibrary.getState();
+          const playlist = lib.createPlaylist(value.trim() || suggested);
+          lib.addToPlaylist(playlist.id, track);
+          useUI.getState().navigate({ name: "playlist", param: playlist.id });
+        },
+      });
     },
   });
 
