@@ -13,6 +13,7 @@ import { TopBar } from "./components/TopBar";
 import { engineBoot } from "./lib/audio";
 import { setAmbientFromArtwork } from "./lib/ambient";
 import { listenForDownloadProgress } from "./lib/downloads";
+import { watchMenuCommands } from "./lib/menuCommands";
 import { usePanelDrop } from "./lib/panelDrop";
 import { useArtworkPalette } from "./lib/palette";
 import { watchSession, useSession } from "./lib/session";
@@ -270,6 +271,10 @@ export default function App() {
   // Native miniplayer bridge: push playback snapshots to the PiP window and
   // execute transport commands coming back from it.
   useEffect(() => startPipSync(), []);
+
+  // macOS application menu: commands in (play/pause, navigation…), playback
+  // state out (menu checkmarks). No-op off macOS.
+  useEffect(() => watchMenuCommands(), []);
 
   // Maximize / restore settle: the OS zooms the window while the layout snaps
   // underneath, and the seam reads as a jarring reflow. A short settle on the

@@ -103,7 +103,11 @@ function TrackRow({ track, index, isCurrent, isPlaying, onPlay, menuFor, showAlb
         alt=""
       />
 
-      <div className="flex-1 min-w-0">
+      {/* min-w floor: with showAlbum the fixed columns (index · artwork · album ·
+          controls · time) can exceed a narrow list and, because the title's flex
+          basis is 0, it would collapse to zero width before anything else gives.
+          The floor keeps the title visible; the album column shrinks instead. */}
+      <div className="flex-1 min-w-[120px]">
         <div className={`flex items-center gap-1.5 text-[16px] font-semibold tracking-[-0.2px] ${isCurrent ? "text-ink-hi" : "text-ink-hi"}`}>
           {track.explicit && <ExplicitBadge />}
           <span className="truncate">{track.title}</span>
@@ -114,7 +118,7 @@ function TrackRow({ track, index, isCurrent, isPlaying, onPlay, menuFor, showAlb
       </div>
 
       {showAlbum && (
-        <div className="w-52 shrink-0 hidden xl:block text-xs text-ink-faint truncate">
+        <div className="w-52 hidden xl:block text-xs text-ink-faint truncate">
           {track.albumId ? (
             <button
               className="hover:text-ink hover:underline text-left transition-colors"

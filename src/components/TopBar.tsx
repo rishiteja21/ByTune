@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { reloadHomeFeed } from "../lib/recs/feed";
 import { useSession } from "../lib/session";
+import { isMac } from "../lib/platform";
 import { useUI } from "../stores/ui";
 import { usePlayer } from "../stores/player";
 import { useRecents } from "../stores/recents";
@@ -106,7 +107,8 @@ function Avatar({ onClick, active }: { onClick: () => void; active?: boolean }) 
 }
 
 /** Windows caption buttons, drawn by the renderer so they match the theme:
-    #242424 hover on min/max, Windows red on close. */
+    #242424 hover on min/max, Windows red on close. macOS renders native
+    traffic lights instead (hiddenInset) and this component is not mounted. */
 export function CaptionButtons() {
   const [maximized, setMaximized] = useState(false);
   useEffect(() => {
@@ -270,11 +272,17 @@ export function TopBar() {
   };
 
   return (
-    /* The renderer draws its own caption buttons (CaptionButtons below), so
-       the bar runs to the window edge. The bar owns the 12px breathing strip
-       under it (App's shell no longer adds one), so its content centres in
-       the full 68px — equal space above and below. */
-    <div className="app-drag relative h-[68px] shrink-0 flex items-center gap-3 pl-3 chrome-glass z-20">
+    /* The bar runs to the window edge: Windows draws renderer caption
+       buttons top-right; macOS reserves the top-left strip for the native
+       traffic lights (hiddenInset) — 84px clears the three lights plus
+       breathing room, so the brand mark starts where they end. The bar owns
+       the 12px breathing strip under it (App's shell no longer adds one),
+       so its content centres in the full 68px — equal space above and below. */
+    <div
+      className={`app-drag relative h-[68px] shrink-0 flex items-center gap-3 chrome-glass z-20 ${
+        isMac ? "pl-[84px]" : "pl-3"
+      }`}
+    >
       {/* Left cluster — brand flush to the edge, then a hairline divider so the
           logo reads as separate from the history + refresh controls (Spotify's
           top-bar model: 32px circular buttons, 16px glyphs). */}
@@ -508,13 +516,14 @@ export function TopBar() {
         </div>
       </div>
 
-      {/* Right cluster — user badge, then the renderer-drawn caption
-          buttons flush to the window edge. */}
+      {/* Right cluster — user badge, then (Windows only) the renderer-drawn
+          caption buttons flush to the window edge. macOS uses the native
+          traffic lights, so nothing is drawn here. */}
       <div className="ml-auto h-full flex items-center gap-1 shrink-0">
         <div className="app-no-drag ml-1 mr-2 flex items-center">
           <Avatar onClick={() => navigate({ name: "settings" })} active={view.name === "settings"} />
         </div>
-        <CaptionButtons />
+        {!isMac && <CaptionButtons />}
       </div>
     </div>
   );

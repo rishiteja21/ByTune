@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { CaptionButtons } from "../components/TopBar";
 import { useSession } from "../lib/session";
+import { isMac } from "../lib/platform";
 import {
   availabilityState,
   passwordProblem,
@@ -748,9 +749,10 @@ export function Onboarding({ initial }: { initial: Screen }) {
       </div>
 
       {/* Frameless-window chrome: a bare drag strip with the caption buttons.
-          Branding lives in the page, not the title bar. */}
+          Branding lives in the page, not the title bar. macOS draws native
+          traffic lights top-left over this strip — nothing to render here. */}
       <div className="app-drag h-12 shrink-0 flex items-start justify-end relative z-10">
-        <CaptionButtons />
+        {!isMac && <CaptionButtons />}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto relative z-10 flex flex-col">

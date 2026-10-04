@@ -6,7 +6,8 @@ Thanks for helping improve ByTune! This document covers what you need to get a d
 
 Prerequisites:
 
-- **Windows 10/11** (the packaged app targets Windows; other platforms are not supported yet)
+- **Windows 10/11** to run and package the Windows edition (NSIS installer)
+- **macOS 11+** to run and package the macOS edition — `.dmg` artifacts can only be produced on macOS, and the Xcode Command Line Tools are needed for native build steps (`xcode-select --install`)
 - **Node.js** — an up-to-date LTS version
 - **Git**
 
@@ -27,9 +28,13 @@ npm run dev
 | `npm test` | Run the unit tests (`node --test`) |
 | `npm run typecheck` | TypeScript check (`tsc --noEmit`) |
 | `npm run build` | Typecheck + build renderer and main process |
-| `npm run dist` | Full build + NSIS installer into `release/` |
+| `npm run dist` | Full build + package for the current platform |
+| `npm run dist:win` | NSIS installer into `release/` (Windows) |
+| `npm run dist:mac` | DMG + ZIP, arm64 and x64, into `release/` (needs macOS) |
 
 Before opening a pull request, please make sure `npm run typecheck` and `npm test` pass.
+
+The Windows and macOS editions share one codebase: platform-specific behavior lives behind `process.platform` guards in `electron/main.ts`, `electron/mac-menu.ts`, `src/lib/platform.ts` and `src/lib/menuCommands.ts` — keep it that way, and check that changes work on both platforms (or are explicitly guarded).
 
 ## Reporting bugs
 
@@ -37,7 +42,7 @@ Open a [GitHub issue](https://github.com/rishiteja21/ByTune/issues) and include:
 
 - What you did and what happened
 - The ByTune version (Settings → About, or the release tag)
-- Your Windows version
+- Your OS and version (Windows 10/11, or macOS 11+ on Apple Silicon/Intel)
 
 Playback issues are often upstream changes on YouTube's side — mention whether playback fails for everything or just some tracks.
 

@@ -8,7 +8,7 @@
  *   - progress + lifecycle events stream to the renderer over download:event
  *
  * Metadata/cover embedding is deliberately not attempted — it needs a tagger
- * dependency; see FEATURE_PARITY.md (marked BLOCKED rather than faked).
+ * dependency, so the feature stays unimplemented rather than faked.
  */
 import { app } from "electron";
 import * as fs from "fs";

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- V8 JIT: required by Electron's rendering engine under Hardened Runtime -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- V8 on Intel Macs maps writable+executable memory -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- ByTune loads no third-party native plugins; leave library validation on -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+    <!-- No camera / microphone / Apple Events: ByTune needs none of them -->
+    <!-- User-selected folders (Downloads, Music, Desktop, Documents) are
+         granted by macOS TCC at pick time via the native open panel; no
+         static entitlement is wanted or needed. -->
+  </dict>
+</plist>

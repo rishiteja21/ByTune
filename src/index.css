@@ -1351,3 +1351,20 @@ html.noglass .chrome-glass {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- macOS typography ---------- */
+/* Windows keeps the Segoe stack from the Tailwind config; on macOS the SF
+   family leads. These rules run after Tailwind's utilities in the cascade
+   and out-specify them, so every font-sans / font-display element follows. */
+html.platform-mac .font-sans {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+}
+html.platform-mac .font-display {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+}
+html.platform-mac body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+}
+html.platform-mac .ob-headline {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+}

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { PipApp } from "./pip/PipApp";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import "./lib/platform";
 import "./index.css";
 
 /**

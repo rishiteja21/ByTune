@@ -14,6 +14,7 @@ import { Artwork, ErrorState, ExplicitBadge, ListSkeleton, Pills } from "../comp
 import { trackMenuItems } from "../lib/trackActions";
 import { useDrag } from "../lib/dnd";
 import { fmtTime } from "../lib/format";
+import { isMac } from "../lib/platform";
 import { usePlayer } from "../stores/player";
 import { useRecents } from "../stores/recents";
 import { tintHoverHandlers, useUI } from "../stores/ui";
@@ -382,7 +383,7 @@ export function SearchView() {
           <SearchX className="w-10 h-10 text-ink-ghost mb-4" />
           <div className="text-[15px] font-semibold text-ink-hi">Search ByTune</div>
           <p className="text-[13px] text-ink-dim mt-1.5 max-w-sm leading-relaxed">
-            Find songs, albums, artists and playlists from YouTube Music. Press Ctrl+F anywhere to jump into search.
+            Find songs, albums, artists and playlists from YouTube Music. Press {isMac ? "⌘F" : "Ctrl+F"} anywhere to jump into search.
           </p>
         </div>
       </div>

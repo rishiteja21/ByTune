@@ -38,7 +38,7 @@ const api = {
   getPlaylist: (id: string) => ipcRenderer.invoke("music:playlist", id),
   getPlaylistPage: (id: string) => ipcRenderer.invoke("music:playlistPage", id),
   getHome: () => ipcRenderer.invoke("music:home"),
-  /** YTM Charts for the device market (regional popularity — cold-start feed). */
+/** YTM Charts for the device market (regional popularity — cold-start feed). */
   getCharts: () => ipcRenderer.invoke("music:charts"),
   /** Per-market moods & genres from the provider's Explore page. */
   getMoods: () => ipcRenderer.invoke("music:moods"),
@@ -169,6 +169,16 @@ const api = {
     ipcRenderer.on("sync:restored", listener as never);
     return () => ipcRenderer.removeListener("sync:restored", listener as never);
   },
+
+  // macOS application menu: commands flow menu → renderer, playback state
+  // flows renderer → menu (checkmarks). No-ops on other platforms.
+  onMenuCommand: (cb: (command: string) => void): (() => void) => {
+    const listener = (_e: unknown, command: string): void => cb(command);
+    ipcRenderer.on("menu:command", listener as never);
+    return () => ipcRenderer.removeListener("menu:command", listener as never);
+  },
+  menuPushState: (state: { playing: boolean; shuffle: boolean; repeat: "off" | "all" | "one" }) =>
+    ipcRenderer.send("menu:push-state", state),
 
   // Filesystem helpers
   defaultDownloadDir: () => ipcRenderer.invoke("app:defaultDownloadDir"),

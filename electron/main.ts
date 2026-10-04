@@ -15,9 +15,11 @@ import { proxyUrlFor, proxyUrlForLocalTrack, startStreamProxy } from "./stream-p
 import * as auth from "./supabase";
 import * as sync from "./sync";
 import * as transition from "./data-transition";
+import { buildAppMenu, type MenuPlaybackState, type MenuWiring } from "./mac-menu";
 import type { Track } from "../src/types";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+const isMac = process.platform === "darwin";
 
 // Covers extracted from local files are served to the renderer over this
 // scheme; registered privileged so <img> can use it everywhere.
@@ -35,6 +37,12 @@ process.on("unhandledRejection", (reason) => {
 });
 
 let mainWindow: BrowserWindow | null = null;
+/**
+ * macOS: closing the main window hides it and keeps the app (and playback)
+ * running — the close button is not a quit. This flag marks a REAL quit so
+ * the hide-on-close guard stands down.
+ */
+let quitting = false;
 /** before-quit can fire twice (window close → quit); the drain must run once. */
 let drainStarted = false;
 /**
@@ -50,6 +58,48 @@ function iconPath(): string | undefined {
   return fs.existsSync(p) ? p : undefined;
 }
 
+/* ------------------------- macOS application menu ------------------------- */
+
+/** Last playback state the renderer pushed; drives the menu checkmarks. */
+let menuState: MenuPlaybackState = { playing: false, shuffle: false, repeat: "off" };
+
+function menuWiring(): MenuWiring {
+  return {
+    sendCommand: (command): void => {
+      // The main window may be hidden (macOS close-to-hide) but its renderer
+      // stays alive — hidden-window commands keep working, which is the point.
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("menu:command", command);
+      }
+    },
+    backupExport: (): void => {
+      void backupExport(mainWindow).catch((err) =>
+        console.warn("[bytune] menu backup export failed:", err instanceof Error ? err.message : err)
+      );
+    },
+    backupImport: (): void => {
+      void backupImport(mainWindow).catch((err) =>
+        console.warn("[bytune] menu backup import failed:", err instanceof Error ? err.message : err)
+      );
+    },
+    showMainWindow: (): void => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow();
+        return;
+      }
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    },
+  };
+}
+
+/** (Re)build the macOS app menu from the current playback state. */
+function applyMenu(): void {
+  if (!isMac) return;
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenu(menuState, menuWiring(), isDev)));
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -60,10 +110,14 @@ function createWindow(): void {
     title: "ByTune",
     show: false,
     autoHideMenuBar: true,
-    // Frameless look, native behaviour: the renderer's top bar is a drag
-    // surface (move + double-click-maximize), while Windows draws its own
+    // Frameless look, native behaviour. Windows: the renderer's top bar is a
+    // drag surface (move + double-click-maximize) while Windows draws its own
     // caption buttons top-right — so the snap-layout flyout still works.
-    titleBarStyle: "hidden",
+    // macOS: hiddenInset keeps the native traffic lights (top-left, inset
+    // below the app menu bar) and the renderer leaves room for them instead
+    // of drawing its own buttons.
+    titleBarStyle: isMac ? "hiddenInset" : "hidden",
+    ...(isMac ? { trafficLightPosition: { x: 20, y: 28 }, zoomToPageWidth: true } : {}),
     icon: iconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -71,12 +125,19 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      // macOS close-to-hide: the window can stay hidden for hours while
+      // music plays. Chromium throttles hidden-window timers (fade curves,
+      // stats accumulation, lyric sync all run on JS timers), so the main
+      // window must keep full timer resolution. Windows destroys its window
+      // on close, so its behaviour is unchanged.
+      backgroundThrottling: isMac ? false : undefined,
     },
   });
 
   mainWindow.once("ready-to-show", () => {
-    // Open maximized by default.
-    if (!mainWindow?.isMaximized()) mainWindow?.maximize();
+    // Windows opens maximized by default; macOS keeps a normal-sized window
+    // (Spotify's convention) — the user's own zoom is remembered by the OS.
+    if (!isMac && !mainWindow?.isMaximized()) mainWindow?.maximize();
     mainWindow?.show();
   });
 
@@ -142,6 +203,17 @@ function createWindow(): void {
     if (input.type === "keyDown" && input.key === "F11") {
       event.preventDefault();
       mainWindow?.setFullScreen(!mainWindow.isFullScreen());
+    }
+  });
+
+  // macOS: the red close button (and Cmd+W) hide the window — a music player
+  // keeps playing with its window closed (Apple Music / Spotify behaviour),
+  // and the Dock icon brings it back via the activate handler. Only a real
+  // quit (Cmd+Q, Dock → Quit) destroys the window.
+  mainWindow.on("close", (event) => {
+    if (isMac && !quitting) {
+      event.preventDefault();
+      mainWindow?.hide();
     }
   });
 
@@ -479,6 +551,19 @@ function registerIpc(): void {
   ipc.handle("sync:now", () => sync.syncNow());
   ipc.handle("sync:backupNow", () => sync.backupNow());
   ipc.handle("sync:restoreNow", () => sync.restoreNow());
+
+  // macOS menu checkmarks: the renderer pushes playback state; the menu is
+  // rebuilt so Shuffle/Repeat/Play-Pause always show the truth.
+  ipc.on("menu:push-state", (_e, s: unknown) => {
+    if (!s || typeof s !== "object") return;
+    const r = (s as { repeat?: unknown }).repeat;
+    menuState = {
+      playing: (s as { playing?: unknown }).playing === true,
+      shuffle: (s as { shuffle?: unknown }).shuffle === true,
+      repeat: r === "all" || r === "one" ? r : "off",
+    };
+    applyMenu();
+  });
 }
 
 /**
@@ -547,7 +632,28 @@ if (!gotLock) {
   });
 
   void app.whenReady().then(() => {
-    Menu.setApplicationMenu(null);
+    if (isMac) {
+      applyMenu();
+      app.setAboutPanelOptions({
+        applicationName: "ByTune",
+        applicationVersion: app.getVersion(),
+        copyright: "Licensed under GPL-3.0",
+      });
+      if (isDev) {
+        // The packaged bundle gets its Dock icon from the .icns in the app
+        // bundle; dev runs would otherwise show the stock Electron icon.
+        const icon = iconPath();
+        if (icon) {
+          try {
+            app.dock?.setIcon(icon);
+          } catch {
+            /* cosmetic only */
+          }
+        }
+      }
+    } else {
+      Menu.setApplicationMenu(null);
+    }
     persist.migrateLegacyData();
     transition.initializeOwner();
     pip.bindMainWindowGetter(() => mainWindow);
@@ -596,6 +702,9 @@ if (!gotLock) {
       return new Response(new Uint8Array(art.data), { headers: { "Content-Type": art.mime } });
     });
     app.on("before-quit", (event) => {
+      // Mark the real quit BEFORE the drain: the hide-on-close guard must
+      // stand down for any close events that fire during shutdown.
+      quitting = true;
       stats.flushSync();
       pip.savePipRect();
       // Kick off a final push, then persist sync-meta synchronously: quit
@@ -637,11 +746,21 @@ if (!gotLock) {
     void startStreamProxy().catch((err) => console.warn("[bytune] stream proxy failed:", err));
     createWindow();
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      // macOS Dock re-open: bring the hidden main window back, recreate it
+      // only if it was actually destroyed (real quit never reaches here).
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+      else {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
     });
   });
 
   app.on("window-all-closed", () => {
-    app.quit();
+    // macOS: the app keeps running when its windows close (close-to-hide
+    // above means the main window is hidden, not destroyed) — quit comes
+    // from Cmd+Q / Dock → Quit, which goes through before-quit.
+    if (!isMac) app.quit();
   });
 }
