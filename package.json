@@ -2,7 +2,7 @@
   "name": "bytune-desktop",
   "productName": "ByTune",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "ByTune",
   "description": "ByTune",
   "main": "dist-electron/main.js",
