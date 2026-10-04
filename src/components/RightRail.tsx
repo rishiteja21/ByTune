@@ -281,8 +281,10 @@ function DetailsBody() {
  * About the artist, Spotify-panel style: photo header with the section label
  * over its top edge, the artist's name with their verified seal, monthly
  * listeners beside a View profile pill, and the editorial blurb — the same
- * "About the artist" writing the artist page shows. The whole card opens
- * that artist page.
+ * "About the artist" writing the artist page shows. Clicking it opens that
+ * artist page; the whole card is also an artist drag source (the home page's
+ * artist cards carry the identical payload), so dropping it on Your Library
+ * follows the artist.
  */
 function AboutArtistCard({
   track,
@@ -295,15 +297,23 @@ function AboutArtistCard({
   const navigate = useUI((s) => s.navigate);
   const listeners = monthlyListenersLabel(about);
   const photo = about?.thumb ?? fallbackImage;
+  // Hooks rule: called before the early return. The card renders only when
+  // `about` exists, so the empty fallback payload can never begin a drag.
+  const drag = useDrag({
+    artist: { id: about?.artistId ?? "", name: about?.name ?? "", thumb: photo ?? undefined },
+  });
 
   if (!about) return null;
 
   return (
     <button
       onClick={() => navigate({ name: "artist", param: about.artistId })}
-      title={`Open ${about.name}`}
+      title={`Open ${about.name} — or drag into Your Library`}
       aria-label={`About the artist — open ${about.name}`}
-      className="group rounded-xl bg-ink-hi/[0.04] overflow-hidden text-left cursor-pointer hover:bg-ink-hi/[0.06] transition-colors animate-fade-in"
+      {...drag.props}
+      className={`group rounded-xl bg-ink-hi/[0.04] overflow-hidden text-left cursor-pointer hover:bg-ink-hi/[0.06] transition-colors animate-fade-in ${
+        drag.dragging ? "opacity-40" : ""
+      }`}
     >
       {/* Photo header with the label over its top edge, Spotify-style — a tall
           3:2 frame showing the whole artist shot, not a cropped strip. */}
