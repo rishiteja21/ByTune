@@ -8,7 +8,8 @@
  *   top bar 26px, auto-hides unless the window is hovered/focused — 6-dot
  *   grip centred, minimize and close X (12px boxes, right 29 / right 9,
  *   vertically centred);
- *   artwork fills the card edge-to-edge (object-cover) inside a 4px frame,
+ *   artwork fills the card edge-to-edge (object-cover) inside a 4px frame
+ *   (5px along the top on Windows — see TOP_INSET),
  *   easing down a few px beneath the dropped bar — transform only, the
  *   cover never re-crops (ByTune's original presentation);
  *   the card's background is the artwork's dominant colour (visible while
@@ -54,6 +55,7 @@ import {
 } from "../components/SpotifyIcons";
 import { fmtTime } from "../lib/format";
 import { upgradeArtwork } from "../lib/artwork";
+import { isWindows } from "../lib/platform";
 import type { PipCommand, PipSnapshot } from "./types";
 
 const dragRegion = { WebkitAppRegion: "drag" } as React.CSSProperties;
@@ -61,7 +63,11 @@ const noDragRegion = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
 
 /** Spotify MiniPlayer geometry (logical px, CDP-measured). */
 const TOP_BAR_H = 26; // dropdown top bar
-const INSET = 4; // frame gap around the artwork card
+const INSET = 4; // frame gap around the artwork card (left/right)
+/** Windows' frameless window border overlaps the client's first pixel row,
+ *  which renders the collapsed top frame a device pixel thinner than the
+ *  sides — on Windows the top runs 1px larger so all three read equal. */
+const TOP_INSET = isWindows ? INSET + 1 : INSET;
 /** How far the cover eases down when the panel drops. Spotify's artwork
  *  barely shifts — its ambient card grows behind a FIXED cover — so the
  *  motion stays a hint (8px), not a half-cover slide. */
@@ -371,12 +377,13 @@ export function PipApp() {
             inside a transformed subtree are placed wrong by Chromium, so
             every app-region lives outside this layer. */}
         <div
-          className={`absolute left-[4px] right-[4px] top-[4px] overflow-hidden rounded-[8px] transition-transform ${
+          className={`absolute left-[4px] right-[4px] overflow-hidden rounded-[8px] transition-transform ${
             expanded ? "duration-200 ease-out" : "duration-[250ms] ease-in"
           }`}
           style={{
-            height: `calc(100% - ${INSET}px)`,
-            transform: expanded ? `translateY(${TOP_BAR_H - INSET}px)` : "translateY(0px)",
+            top: TOP_INSET,
+            height: `calc(100% - ${TOP_INSET}px)`,
+            transform: expanded ? `translateY(${TOP_BAR_H - TOP_INSET}px)` : "translateY(0px)",
             backgroundColor: ambient,
           }}
         >
