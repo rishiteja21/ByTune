@@ -47,10 +47,15 @@ jobs:
       - name: Build renderer + electron main
         run: npm run build
 
-      - name: Package DMG + ZIP (arm64 and x64)
-        # --publish never: electron-builder's CI auto-publish demands GH_TOKEN;
-        # attaching to the release is done by the step below instead.
-        run: npx electron-builder --mac --publish never
+      - name: Package arm64 DMG + ZIP
+        # Sequential arch invocations: building both arches' DMGs in parallel
+        # makes the two hdiutil mounts collide ("hdiutil detach" failure).
+        run: npx electron-builder --mac --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Package x64 DMG + ZIP
+        run: npx electron-builder --mac --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
