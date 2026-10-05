@@ -1,5 +1,6 @@
 /** ByTune desktop — Electron main process. */
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, session, shell } from "electron";
+import type { NativeImage } from "electron";
 import { pathToFileURL } from "url";
 import * as fs from "fs";
 import * as path from "path";
@@ -15,7 +16,7 @@ import { proxyUrlFor, proxyUrlForLocalTrack, startStreamProxy } from "./stream-p
 import * as auth from "./supabase";
 import * as sync from "./sync";
 import * as transition from "./data-transition";
-import { buildAppMenu, type MenuPlaybackState, type MenuWiring } from "./mac-menu";
+import { buildAppMenu, type MenuCommand, type MenuPlaybackState, type MenuWiring } from "./mac-menu";
 import type { Track } from "../src/types";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -100,6 +101,52 @@ function applyMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenu(menuState, menuWiring(), isDev)));
 }
 
+/* ------------------------ Windows taskbar thumbbar ------------------------ */
+
+/**
+ * Transport buttons on the taskbar preview (hover the taskbar icon):
+ * previous · play/pause · next — the surface Spotify shows. Windows only
+ * (setThumbarButtons wraps win32 ITaskbarList3; macOS has no taskbar). The
+ * play/pause glyph follows the renderer's pushed playback state — the same
+ * menu:push-state signal that drives the macOS menu checkmarks — so one
+ * renderer push keeps both native surfaces truthful.
+ */
+const thumbarIcons = new Map<string, NativeImage>();
+
+function thumbarIcon(name: "previous" | "play" | "pause" | "next"): NativeImage {
+  let img = thumbarIcons.get(name);
+  if (!img) {
+    // 1x (16px) + 2x (32px) representations: high-DPI taskbars pick the
+    // sharp copy instead of upscaling a blurry 16px bitmap.
+    img = nativeImage.createEmpty();
+    for (const [scale, file] of [
+      [1, `${name}-16.png`],
+      [2, `${name}-32.png`],
+    ] as const) {
+      const p = path.join(__dirname, "assets", "thumbar", file);
+      if (fs.existsSync(p)) img.addRepresentation({ scaleFactor: scale, buffer: fs.readFileSync(p) });
+    }
+    thumbarIcons.set(name, img);
+  }
+  return img;
+}
+
+/** Returns true when the taskbar accepted the buttons (false = too early). */
+function applyThumbar(): boolean {
+  if (process.platform !== "win32") return true;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const command = (c: MenuCommand) => (): void => menuWiring().sendCommand(c);
+  return mainWindow.setThumbarButtons([
+    { icon: thumbarIcon("previous"), tooltip: "Previous", click: command("previous") },
+    {
+      icon: thumbarIcon(menuState.playing ? "pause" : "play"),
+      tooltip: menuState.playing ? "Pause" : "Play",
+      click: command("play-pause"),
+    },
+    { icon: thumbarIcon("next"), tooltip: "Next", click: command("next") },
+  ]);
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -140,6 +187,18 @@ function createWindow(): void {
     if (!isMac && !mainWindow?.isMaximized()) mainWindow?.maximize();
     mainWindow?.show();
   });
+
+  // Windows taskbar thumbbar: the toolbar can only attach once the window
+  // owns a taskbar button, i.e. after the first show. If Windows still
+  // refuses (shell timing), retry once — every later play/pause re-applies
+  // the bar anyway via menu:push-state.
+  if (process.platform === "win32") {
+    mainWindow.once("show", () => {
+      const ok = applyThumbar();
+      if (isDev) console.log("[bytune] taskbar thumbbar:", ok ? "attached" : "deferred");
+      if (!ok) setTimeout(applyThumbar, 1500);
+    });
+  }
 
   // Keep the renderer's maximize/restore button icon in sync.
   const sendMaximized = (): void => {
@@ -552,8 +611,9 @@ function registerIpc(): void {
   ipc.handle("sync:backupNow", () => sync.backupNow());
   ipc.handle("sync:restoreNow", () => sync.restoreNow());
 
-  // macOS menu checkmarks: the renderer pushes playback state; the menu is
-  // rebuilt so Shuffle/Repeat/Play-Pause always show the truth.
+  // macOS menu checkmarks + the Windows taskbar thumbbar glyph: the renderer
+  // pushes playback state; the menu is rebuilt so Shuffle/Repeat/Play-Pause
+  // always show the truth, and the thumbbar swaps its play/pause icon.
   ipc.on("menu:push-state", (_e, s: unknown) => {
     if (!s || typeof s !== "object") return;
     const r = (s as { repeat?: unknown }).repeat;
@@ -563,6 +623,7 @@ function registerIpc(): void {
       repeat: r === "all" || r === "one" ? r : "off",
     };
     applyMenu();
+    applyThumbar();
   });
 }
 
