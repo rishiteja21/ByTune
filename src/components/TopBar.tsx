@@ -52,7 +52,7 @@ function BrandHeader() {
       <img
         src={brandText}
         alt="ByTune"
-        className="h-5 w-auto block"
+        className="h-[19px] w-auto block"
       />
     </div>
   );
