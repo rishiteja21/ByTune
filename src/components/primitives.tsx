@@ -5,7 +5,7 @@
  * stay consistent across the entire application.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Music2, Play, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Music2, Play, type LucideIcon } from "lucide-react";
 import { extractPalette, type Palette } from "../lib/ambient";
 import { upgradeArtwork } from "../lib/artwork";
 import { useUI } from "../stores/ui";
@@ -40,6 +40,102 @@ export function Shelf({
       </div>
       {children}
     </section>
+  );
+}
+
+/* ============================================================ shelf arrows */
+
+/**
+ * Horizontal card row with Spotify-style hover arrows. Scrolling itself stays
+ * native — trackpad, wheel, touch — the arrows are a hover affordance that
+ * page through the shelf in card-aligned steps, popping in from the edges
+ * only for directions that still have content to show.
+ *
+ * The wrapper is a named group (`group/shelf`) so the arrows' show/hide
+ * variants never bleed into the cards' own `group-hover` states.
+ */
+export function ShelfScroller({
+  children,
+  arrowTop = "top-[74px]",
+  className = "",
+}: {
+  children: ReactNode;
+  /** Arrow band position — defaults to the cover line's centre for the home cards (8px pad + 168px square). */
+  arrowTop?: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = (): void => {
+      const max = el.scrollWidth - el.clientWidth;
+      setCanLeft(el.scrollLeft > 2);
+      setCanRight(max > 2 && el.scrollLeft < max - 2);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    // Card widths are fixed, so the scrollable range only moves when the row
+    // itself resizes or items are added/removed.
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    const mo = new MutationObserver(update);
+    mo.observe(el, { childList: true });
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, []);
+
+  /** One press = one page of cards; uniform-width rows land card-aligned. */
+  const page = (dir: 1 | -1): void => {
+    const el = ref.current;
+    if (!el) return;
+    const rects = Array.from(el.children, (c) => (c as HTMLElement).getBoundingClientRect());
+    const pitches = rects.slice(1).map((r, i) => r.left - rects[i].left);
+    const pitch = pitches.length ? Math.min(...pitches) : 0;
+    const uniform = pitch > 0 && Math.max(...pitches) - pitch < 2;
+    const step = uniform
+      ? Math.max(1, Math.round((el.clientWidth + 12) / pitch)) * pitch
+      : el.clientWidth * 0.9;
+    el.scrollBy({ left: dir * step, behavior: "smooth" });
+  };
+
+  const arrow = (dir: 1 | -1) => {
+    const can = dir === 1 ? canRight : canLeft;
+    const Icon = dir === 1 ? ChevronRight : ChevronLeft;
+    return (
+      <div
+        className={`pointer-events-none absolute z-20 ${
+          dir === 1 ? "right-1 translate-x-1" : "left-1 -translate-x-1"
+        } ${arrowTop} scale-75 opacity-0 transition-all duration-200 ease-out ${
+          can ? "" : "hidden"
+        } group-hover/shelf:pointer-events-auto group-hover/shelf:translate-x-0 group-hover/shelf:scale-100 group-hover/shelf:opacity-100 group-focus-within/shelf:pointer-events-auto group-focus-within/shelf:translate-x-0 group-focus-within/shelf:scale-100 group-focus-within/shelf:opacity-100`}
+      >
+        <button
+          type="button"
+          aria-label={dir === 1 ? "Scroll shelf right" : "Scroll shelf left"}
+          onClick={() => page(dir)}
+          className="grid h-9 w-9 cursor-pointer place-items-center rounded-full border border-white/10 bg-black/65 text-ink-hi shadow-elev transition-all duration-150 ease-out hover:scale-110 hover:bg-black/85 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+        >
+          <Icon className="h-[18px] w-[18px]" strokeWidth={2.5} />
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div className={`group/shelf relative ${className}`}>
+      <div ref={ref} className="flex gap-4 overflow-x-auto pb-2 shelf-scroll">
+        {children}
+      </div>
+      {arrow(-1)}
+      {arrow(1)}
+    </div>
   );
 }
 

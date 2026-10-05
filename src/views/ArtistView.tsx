@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Heart, ListPlus, MoreHorizontal, MoreVertical, Play, Shuffle, User } from "lucide-react";
-import { Artwork, ErrorState, ExplicitBadge, HeroSkeleton, ListSkeleton } from "../components/primitives";
+import { Artwork, ErrorState, ExplicitBadge, HeroSkeleton, ListSkeleton, ShelfScroller } from "../components/primitives";
 import { trackMenuItems } from "../lib/trackActions";
 import { useDrag } from "../lib/dnd";
 import { fmtTime } from "../lib/format";
@@ -329,11 +329,11 @@ export function ArtistView({ artistId }: { artistId: string }) {
         {shelves.map((shelf) => (
           <section key={shelf.title} className="animate-fade-in">
             <h2 className="section-title text-[21px] mb-3">{shelf.title}</h2>
-            <div className="flex gap-4 overflow-x-auto pb-2 shelf-scroll">
+            <ShelfScroller arrowTop="top-[68px]">
               {shelf.items.map((item, i) => (
                 <SectionCard key={`${shelf.title}-${i}`} item={item} />
               ))}
-            </div>
+            </ShelfScroller>
           </section>
         ))}
       </div>

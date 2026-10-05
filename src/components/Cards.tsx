@@ -3,7 +3,7 @@ import { playPlaylist } from "../lib/playlist";
 import { albumPayload, useDrag } from "../lib/dnd";
 import { usePlayer } from "../stores/player";
 import { tintHoverHandlers, useUI } from "../stores/ui";
-import { Artwork, PlayOverlay } from "./primitives";
+import { Artwork, PlayOverlay, ShelfScroller } from "./primitives";
 import type { Album, Artist, HomeItem, HomeShelf, PlaylistCard, Track } from "../types";
 import type { KeyboardEvent } from "react";
 
@@ -141,7 +141,7 @@ export function HomeShelfView({ shelf }: { shelf: HomeShelf }) {
   return (
     <section className="animate-slide-up">
       <h2 className="section-title text-[21px] mb-4">{shelf.title}</h2>
-      <div className="flex gap-4 overflow-x-auto pb-2 shelf-scroll">
+      <ShelfScroller>
         {shelf.items.map((item: HomeItem, i: number) => {
           if (item.kind === "track" && item.track) return <TrackCard key={`${item.track.id}-${i}`} track={item.track} />;
           if (item.kind === "album" && item.album) return <AlbumCard key={`${item.album.id}-${i}`} album={item.album} />;
@@ -150,7 +150,7 @@ export function HomeShelfView({ shelf }: { shelf: HomeShelf }) {
             return <PlaylistCardView key={`${item.playlist.id}-${i}`} playlist={item.playlist} />;
           return null;
         })}
-      </div>
+      </ShelfScroller>
     </section>
   );
 }

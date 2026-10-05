@@ -14,7 +14,7 @@
 import { Play } from "lucide-react";
 import { AlbumCard, ArtistCard, HomeShelfView, TrackCard } from "../components/Cards";
 import { EyebrowHeader, MixCard, RadioCard } from "../components/recCards";
-import { Artwork, Shelf, ShelfSkeleton } from "../components/primitives";
+import { Artwork, Shelf, ShelfScroller, ShelfSkeleton } from "../components/primitives";
 import { useHomeFeed } from "../lib/recs/feed";
 import { useDrag } from "../lib/dnd";
 import type { HomeSection } from "../lib/recs/sections";
@@ -101,8 +101,6 @@ function SectionView({ section }: { section: HomeSection }) {
   const eyebrow = section.eyebrow;
   const openArtist = eyebrow ? () => navigate({ name: "artist", param: eyebrow.artistId }) : undefined;
 
-  const rowClass = "flex gap-4 overflow-x-auto pb-2 shelf-scroll";
-
   if (section.layout === "yt-shelf" && section.shelf) {
     return <HomeShelfView shelf={section.shelf} />;
   }
@@ -122,7 +120,7 @@ function SectionView({ section }: { section: HomeSection }) {
       return <MoodChips moods={section.moods ?? []} />;
     }
     return (
-      <div className={rowClass}>
+      <ShelfScroller>
         {section.items.map((item, i) => {
           const key = `${section.id}-${item.style}-${i}`;
           switch (item.style) {
@@ -140,7 +138,7 @@ function SectionView({ section }: { section: HomeSection }) {
               return null;
           }
         })}
-      </div>
+      </ShelfScroller>
     );
   })();
 
