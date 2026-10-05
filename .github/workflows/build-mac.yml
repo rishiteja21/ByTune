@@ -48,14 +48,22 @@ jobs:
         run: npm run build
 
       - name: Package arm64 DMG + ZIP
-        # Sequential arch invocations: building both arches' DMGs in parallel
-        # makes the two hdiutil mounts collide ("hdiutil detach" failure).
-        run: npx electron-builder --mac --arm64 --publish never
+        run: |
+          # Sequential arch builds: parallel DMGs collide in hdiutil, and
+          # GitHub's macOS images keep /Volumes root-writable only, which
+          # trips the builder's mount-point mkdir. Widen it; if the DMG
+          # stage still fails, rerun the packager as root.
+          sudo chmod 775 /Volumes || true
+          npx electron-builder --mac --arm64 --publish never || \
+            sudo --preserve-env=PATH,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --arm64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Package x64 DMG + ZIP
-        run: npx electron-builder --mac --x64 --publish never
+        run: |
+          sudo chmod 775 /Volumes || true
+          npx electron-builder --mac --x64 --publish never || \
+            sudo --preserve-env=PATH,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
