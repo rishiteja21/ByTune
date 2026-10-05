@@ -143,11 +143,16 @@ function IconBtn({
       title={title}
       aria-label={title}
       aria-pressed={active}
-      className={`grid h-8 w-8 cursor-pointer place-items-center rounded-full transition-all duration-150 hover:bg-white/10 active:scale-90 disabled:pointer-events-none disabled:opacity-40 ${
-        active ? "text-[#1ed760] hover:text-[#3be477]" : "text-white/90 hover:text-white"
+      className={`relative grid h-8 w-8 cursor-pointer place-items-center rounded-full transition-all duration-150 hover:bg-white/10 active:scale-90 disabled:pointer-events-none disabled:opacity-40 ${
+        active ? "text-white" : "text-white/90 hover:text-white"
       } focus-visible:text-white`}
     >
       {children}
+      {/* Spotify's selected treatment: the icon keeps its normal colour and a
+          small dot appears beneath it — no colour change. */}
+      {active && (
+        <span className="absolute bottom-[2px] left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white" />
+      )}
     </button>
   );
 }
@@ -432,7 +437,9 @@ export function PipApp() {
                   if (!e.currentTarget.contains(e.relatedTarget as Node | null)) scheduleVolClose();
                 }}
               >
-                <IconBtn onClick={() => send({ type: "mute" })} active={snap?.muted} title={snap?.muted ? "Unmute" : "Mute"}>
+                {/* No active marking: the glyph itself swaps to the muted
+                    speaker, the way Spotify communicates mute. */}
+                <IconBtn onClick={() => send({ type: "mute" })} title={snap?.muted ? "Unmute" : "Mute"}>
                   <span key={snap?.muted ? "off" : "on"} className="icon-swap">
                     {snap?.muted ? <SpVolumeOff /> : <SpVolumeHigh />}
                   </span>

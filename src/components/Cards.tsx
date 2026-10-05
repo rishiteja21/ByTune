@@ -17,9 +17,12 @@ function activateOnKey(open: () => void) {
   };
 }
 
-/* Shelf tile: artwork-first, square cover over title/subtitle, no
-   padded surface — the cover itself is the card. */
-const CARD = "group w-[168px] shrink-0 text-left cursor-pointer active:scale-[0.98]";
+/* Shelf tile: artwork-first, square cover over title/subtitle — the card is
+   transparent at rest; hovering fades in Spotify's translucent tile around
+   it. 8px inset keeps Spotify's proportion at this size; width grows to
+   keep the cover at its tuned 168px. */
+const CARD =
+  "group w-[184px] shrink-0 text-left cursor-pointer active:scale-[0.98] rounded-xl p-2 transition-colors duration-200 hover:bg-ink-hi/[0.08]";
 
 const CARD_TITLE = "text-[15px] font-semibold text-ink-hi truncate leading-snug";
 const CARD_SUB = "text-[13px] text-ink-dim truncate mt-0.5";

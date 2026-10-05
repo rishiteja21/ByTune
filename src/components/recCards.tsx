@@ -13,7 +13,11 @@ import { pastelFor, type HomeSection } from "../lib/recs/sections";
 import { tintHoverHandlers } from "../stores/ui";
 import { Artwork, PlayOverlay } from "./primitives";
 
-const CARD = "group w-[168px] shrink-0 text-left cursor-pointer active:scale-[0.98]";
+/* Same hover-only tile as the Cards.tsx shelf cards (keep the two in sync):
+   transparent at rest, translucent box fades in on hover, 8px inset —
+   artwork keeps 168px. */
+const CARD =
+  "group w-[184px] shrink-0 text-left cursor-pointer active:scale-[0.98] rounded-xl p-2 transition-colors duration-200 hover:bg-ink-hi/[0.08]";
 const CARD_TITLE = "text-[15px] font-semibold text-ink-hi truncate leading-snug";
 const CARD_SUB = "text-[13px] text-ink-dim truncate mt-0.5";
 

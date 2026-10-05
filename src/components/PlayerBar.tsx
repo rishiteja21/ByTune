@@ -14,7 +14,8 @@
  *  - centre: [shuffle, prev] —16px— play disc —16px— [next, repeat], the
  *    groups flex-1 so the disc sits dead centre; buttons 32×32 (8px pad,
  *    full radius), icons 16×16 #b3b3b3 → white on hover; disc 32px white
- *    with the black 16px glyph; active modes #1ed760 + green dot beneath
+ *    with the black 16px glyph; active modes keep their colour with a
+ *    white dot beneath (Spotify's treatment)
  *  - seek row (8px below transport): fixed 50px time boxes (12/17
  *    #b3b3b3) flanking a flexible bar — 12px hit area, 4px track (2px
  *    radius, white @30%), white fill, 12px white handle on hover
@@ -68,12 +69,12 @@ function TransportButton({
       title={title}
       aria-label={title}
       className={`relative grid h-8 w-8 place-items-center rounded-full transition-colors ${
-        active ? "text-[#1ed760] hover:text-[#3be477]" : "text-[#b3b3b3] hover:text-white"
+        active ? "text-white" : "text-[#b3b3b3] hover:text-white"
       }`}
     >
       {children}
       {active && (
-        <span className="absolute bottom-[2px] left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-[#1ed760]" />
+        <span className="absolute bottom-[2px] left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white" />
       )}
     </button>
   );
@@ -99,11 +100,16 @@ function BarButton({
       title={title}
       aria-label={title}
       aria-pressed={active}
-      className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${extra} ${
-        active ? "text-white bg-white/10" : "text-white/70 hover:text-white"
+      className={`relative grid h-8 w-8 place-items-center rounded-full transition-colors ${extra} ${
+        active ? "text-white" : "text-white/70 hover:text-white"
       }`}
     >
       {children}
+      {/* Spotify's selected treatment for the right-cluster toggles: full
+          white icon plus a small dot beneath — no highlight circle. */}
+      {active && (
+        <span className="absolute bottom-[2px] left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white" />
+      )}
     </button>
   );
 }
