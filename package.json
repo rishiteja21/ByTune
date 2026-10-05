@@ -2,7 +2,7 @@
   "name": "bytune-desktop",
   "productName": "ByTune",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "ByTune",
   "description": "ByTune — desktop music player for Windows & macOS",
   "main": "dist-electron/main.js",
