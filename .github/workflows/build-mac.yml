@@ -47,22 +47,23 @@ jobs:
       - name: Build renderer + electron main
         run: npm run build
 
-      - name: Package arm64 DMG + ZIP
-        # Root from the start (runner images keep /Volumes root-writable) and
-        # Spotlight off (it indexes mounted DMG volumes and makes
-        # "hdiutil detach" fail busy). One clean attempt per arch; no
-        # fallback stacking on a half-failed volume state.
+      - name: Package ZIP installers (guaranteed)
+        # ZIP targets have proven reliable on CI; DMGs are attempted
+        # separately as best effort. Per-arch invocations keep the hdiutil
+        # volume handling single-threaded.
         run: |
-          sudo mdutil -a -i off >/dev/null 2>&1 || true
-          sudo hdiutil detach "/Volumes/ByTune 1.0.3" -force >/dev/null 2>&1 || true
-          sudo --preserve-env=PATH,HOME,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --arm64 --publish never
+          npx electron-builder --mac zip --arm64 --publish never
+          npx electron-builder --mac zip --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Package x64 DMG + ZIP
+      - name: Package DMG installers (best effort)
+        # hdiutil attach/detach on GitHub's macOS images is flaky ("detach
+        # ... Resource busy"); a DMG failure must not sink the ZIP release.
         run: |
-          sudo hdiutil detach "/Volumes/ByTune 1.0.3" -force >/dev/null 2>&1 || true
-          sudo --preserve-env=PATH,HOME,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --x64 --publish never
+          sudo mdutil -a -i off >/dev/null 2>&1 || true
+          npx electron-builder --mac dmg --arm64 --publish never || true
+          npx electron-builder --mac dmg --x64 --publish never || true
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -80,4 +81,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" release/*.dmg release/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          gh release upload "$TAG" release/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+          # DMGs only exist when the flaky hdiutil stage happened to succeed.
+          shopt -s nullglob
+          dmgs=(release/*.dmg)
+          if [ ${#dmgs[@]} -gt 0 ]; then
+            gh release upload "$TAG" "${dmgs[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          fi
