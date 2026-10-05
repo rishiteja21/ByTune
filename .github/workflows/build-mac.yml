@@ -48,22 +48,21 @@ jobs:
         run: npm run build
 
       - name: Package arm64 DMG + ZIP
+        # Root from the start (runner images keep /Volumes root-writable) and
+        # Spotlight off (it indexes mounted DMG volumes and makes
+        # "hdiutil detach" fail busy). One clean attempt per arch; no
+        # fallback stacking on a half-failed volume state.
         run: |
-          # Sequential arch builds: parallel DMGs collide in hdiutil, and
-          # GitHub's macOS images keep /Volumes root-writable only, which
-          # trips the builder's mount-point mkdir. Widen it; if the DMG
-          # stage still fails, rerun the packager as root.
-          sudo chmod 775 /Volumes || true
-          npx electron-builder --mac --arm64 --publish never || \
-            sudo --preserve-env=PATH,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --arm64 --publish never
+          sudo mdutil -a -i off >/dev/null 2>&1 || true
+          sudo hdiutil detach "/Volumes/ByTune 1.0.3" -force >/dev/null 2>&1 || true
+          sudo --preserve-env=PATH,HOME,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --arm64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Package x64 DMG + ZIP
         run: |
-          sudo chmod 775 /Volumes || true
-          npx electron-builder --mac --x64 --publish never || \
-            sudo --preserve-env=PATH,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --x64 --publish never
+          sudo hdiutil detach "/Volumes/ByTune 1.0.3" -force >/dev/null 2>&1 || true
+          sudo --preserve-env=PATH,HOME,CSC_IDENTITY_AUTO_DISCOVERY "$(which npx)" electron-builder --mac --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
