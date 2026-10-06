@@ -15,12 +15,15 @@
  * sections from cache in milliseconds.
  */
 import { useEffect, useRef, useState } from "react";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { peekArtistMeta, resolveArtistMeta } from "../../stores/artistMeta";
 import { requireBridge } from "../../lib/bridge";
+import { storage } from "../persist";
 import { useUI } from "../../stores/ui";
 import type { HomeShelf } from "../../types";
 import { FALLBACK_MOODS } from "../../../electron/moods";
-import { getArtistBundle, peekBundle, pruneBundles, type ArtistBundle } from "./candidates";
+import { getArtistBundle, peekBundle, pruneBundles, useBundleCacheVersion, type ArtistBundle } from "./candidates";
 import { useTasteProfile, type TasteProfile } from "./profile";
 import { buildHomeSections, type HomeSection } from "./sections";
 
@@ -36,6 +39,57 @@ let ytShelvesStale = false;
 let chartsCache: { shelves: HomeShelf[]; at: number } | null = null;
 let chartsStale = false;
 
+/* Disk-backed mirror of the market caches — the in-memory copies above die
+   with the window, and without this mirror every app launch re-fetched the
+   charts, the regional feed and the moods catalog before wave 0 could show
+   a single market cover. Rehydration seeds the module caches and bumps the
+   version, so wave 0 repaints with the last session's shelves immediately;
+   the loaders write through on every successful fetch. */
+interface MarketCacheState {
+  yt: { shelves: HomeShelf[]; at: number } | null;
+  charts: { shelves: HomeShelf[]; at: number } | null;
+  moods: { titles: string[]; at: number } | null;
+  version: number;
+  put(patch: {
+    yt?: { shelves: HomeShelf[]; at: number };
+    charts?: { shelves: HomeShelf[]; at: number };
+    moods?: { titles: string[]; at: number };
+  }): void;
+  bump(): void;
+}
+
+export const useMarketCache = create<MarketCacheState>()(
+  persist(
+    (set, get) => ({
+      yt: null,
+      charts: null,
+      moods: null,
+      version: 0,
+      put(patch) {
+        set({ ...patch, version: get().version + 1 });
+      },
+      bump() {
+        set({ version: get().version + 1 });
+      },
+    }),
+    {
+      name: "home-market-cache",
+      storage: createJSONStorage(() => storage),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        ytShelvesCache = state.yt ? { ...state.yt } : ytShelvesCache;
+        chartsCache = state.charts ? { ...state.charts } : chartsCache;
+        moodsCache = state.moods ? { ...state.moods } : moodsCache;
+        state.bump();
+      },
+    }
+  )
+);
+
+export function useMarketCacheVersion(): number {
+  return useMarketCache((s) => s.version);
+}
+
 function shelvesUsable(cache: { at: number } | null, stale: boolean): boolean {
   return cache != null && (stale || Date.now() - cache.at < YT_TTL_MS);
 }
@@ -47,6 +101,7 @@ async function loadYtShelves(): Promise<HomeShelf[] | null> {
     if (shelves && shelves.length > 0) {
       ytShelvesCache = { shelves, at: Date.now() };
       ytShelvesStale = false;
+      useMarketCache.getState().put({ yt: { shelves, at: Date.now() } });
       return shelves;
     }
   } catch {
@@ -68,6 +123,7 @@ async function loadCharts(): Promise<HomeShelf[] | null> {
     if (shelves && shelves.length > 0) {
       chartsCache = { shelves, at: Date.now() };
       chartsStale = false;
+      useMarketCache.getState().put({ charts: { shelves, at: Date.now() } });
       return shelves;
     }
   } catch {
@@ -119,6 +175,7 @@ async function loadMoodTitles(): Promise<string[] | null> {
       .map((m) => m.title);
     if (titles.length >= 6) {
       moodsCache = { titles, at: Date.now() };
+      useMarketCache.getState().put({ moods: { titles, at: Date.now() } });
       return titles;
     }
   } catch {
@@ -211,6 +268,11 @@ export function reloadHomeFeed(): void {
 export function useHomeFeed(): { sections: HomeSection[]; profile: TasteProfile | null } {
   const profile = useTasteProfile();
   const reloadNonce = useUI((s) => s.homeReloadNonce);
+  // The disk-backed caches rehydrate after first paint (cold start) and the
+  // background refreshes write through — either landing repaints wave 0 with
+  // the now-available covers, no network needed.
+  const bundlesVersion = useBundleCacheVersion();
+  const marketVersion = useMarketCacheVersion();
   const [sections, setSections] = useState<HomeSection[]>([]);
   const runSeq = useRef(0);
   const signature = profile?.signature ?? "";
@@ -263,10 +325,10 @@ export function useHomeFeed(): { sections: HomeSection[]; profile: TasteProfile 
       void orchestrate(profile, apply);
     }, 250);
     return () => window.clearTimeout(timer);
-    // Re-run only when the underlying signals actually move — or when the
-    // user asks for a manual refresh from the TopBar.
+    // Re-run when the underlying signals move, when the user asks for a
+    // manual refresh from the TopBar, or when a disk-backed cache lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, reloadNonce]);
+  }, [signature, reloadNonce, bundlesVersion, marketVersion]);
 
   return { sections, profile };
 }

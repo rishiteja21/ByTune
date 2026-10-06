@@ -316,7 +316,17 @@ function stripMediaReferer(): void {
 }
 
 // Exact names used by renderer persistence; internal stores are main-only.
-const RENDERER_STORES = new Set(["settings", "library", "player", "recent-searches", "listening-signals", "artist-meta-cache"]);
+const RENDERER_STORES = new Set([
+  "settings",
+  "library",
+  "player",
+  "recent-searches",
+  "listening-signals",
+  "artist-meta-cache",
+  "artist-bundle-cache",
+  "artist-about-cache",
+  "home-market-cache",
+]);
 function assertRendererStore(name: unknown): asserts name is string {
   if (typeof name !== "string" || !RENDERER_STORES.has(name)) throw new Error("Store not allowed");
 }

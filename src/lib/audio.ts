@@ -4,7 +4,8 @@
  * The store holds pure state; this module owns all playback side effects:
  * stream resolution (via the main process), play/pause/seek application,
  * error recovery with client rotation, history logging, MediaSession
- * integration (Windows media keys / SMTC), and transitions.
+ * integration (Windows media keys / SMTC, with double-press recognition for
+ * headset play/pause buttons and pause-on-output-loss), and transitions.
  *
  * Transitions (crossfade controller):
  *   - "standard" crossfade: when a setting duration is configured, the next
@@ -46,6 +47,8 @@ import { requireBridge } from "./bridge";
 import { emitPlayEvent } from "./playEvents";
 import { analyseTrackHead, detectEdgeSilence } from "./analysis";
 import { upgradeArtwork } from "./artwork";
+import { createMediaKeyTap } from "./media-key-tap";
+import { outputChangeAction, snapshotOutputs, type OutputSnapshot } from "./audio-output";
 
 let elements: [HTMLAudioElement, HTMLAudioElement] | null = null;
 /** which element is the session player right now */
@@ -954,6 +957,7 @@ export function initAudioEngine(): void {
   useSettings.subscribe(() => applySpeed());
 
   setupMediaSession();
+  setupAudioOutputWatch();
 }
 
 function onTrackEnded(): void {
@@ -1260,20 +1264,98 @@ function setupMediaSession(): void {
       /* unsupported action */
     }
   };
-  set("play", () => usePlayer.getState().setPlaying(true));
-  set("pause", () => usePlayer.getState().setPlaying(false));
-  set("previoustrack", () => usePlayer.getState().prev());
-  set("nexttrack", () => usePlayer.getState().next(true));
+  // Physical media play/pause buttons (headset middle buttons, BT AVRCP, the
+  // Windows media flyout) all arrive here as absolute play/pause actions —
+  // there is no native double-press event, so repeated presses are recognized
+  // as next-track at this layer (see media-key-tap.ts). The pressed command
+  // is replayed rather than a toggle: the player's state may have moved
+  // during the recognition window, and a stale absolute command is a no-op
+  // against it while a toggle would fight it.
+  const tap = createMediaKeyTap(
+    {
+      schedule: (fn, ms) => {
+        const id = window.setTimeout(fn, ms);
+        return () => window.clearTimeout(id);
+      },
+    },
+    {
+      single: (kind) => usePlayer.getState().setPlaying(kind === "play"),
+      multi: () => usePlayer.getState().next(true),
+    },
+  );
+  set("play", () => tap.press("play"));
+  set("pause", () => tap.press("pause"));
+  // A pending single press belongs to the pre-skip context; applying it after
+  // the user already moved (or seeked) elsewhere would stop what they chose.
+  set("previoustrack", () => {
+    tap.cancelPending();
+    usePlayer.getState().prev();
+  });
+  set("nexttrack", () => {
+    tap.cancelPending();
+    usePlayer.getState().next(true);
+  });
   set("seekbackward", () => {
+    tap.cancelPending();
     const s = usePlayer.getState();
     s.seek(Math.max(0, s.position - 10));
   });
   set("seekforward", () => {
+    tap.cancelPending();
     const s = usePlayer.getState();
     s.seek(s.position + 10);
   });
   set("seekto", (details) => {
+    tap.cancelPending();
     if (details.seekTime != null) usePlayer.getState().seek(details.seekTime);
   });
   window.setInterval(syncPositionState, 1000);
+}
+
+/**
+ * Pause when the output the listener is hearing disappears.
+ *
+ * Chromium re-routes live audio to the new Windows default endpoint on its
+ * own — that's why audio used to fall back to the PC speakers when a
+ * headset was unplugged mid-song. There is no removal event; `devicechange`
+ * fires and enumeration tells us whether the previous default's backing
+ * device is still connected (the logic lives in audio-output.ts). Every
+ * other case — connecting a device, intentional switching while both stay
+ * alive, an unrelated microphone leaving — leaves the old default's group
+ * in the list and playback untouched.
+ *
+ * The pause goes through setPlaying(false): the same path as the UI button,
+ * so an in-flight crossfade freezes cleanly with it and resume stays valid.
+ */
+function setupAudioOutputWatch(): void {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
+  const md = navigator.mediaDevices;
+  let prev: OutputSnapshot | null = null;
+  let running = false;
+  let rerun = false;
+  const refresh = async (): Promise<void> => {
+    // Serialize: overlapping enumerations could apply an older view last.
+    if (running) {
+      rerun = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        rerun = false;
+        const snap = snapshotOutputs(await md.enumerateDevices());
+        // Playing is read after the await — it may have moved while enumerating.
+        if (outputChangeAction(prev, snap, usePlayer.getState().playing) === "pause") {
+          usePlayer.getState().setPlaying(false);
+        }
+        prev = snap;
+      } while (rerun);
+    } catch {
+      /* enumeration is best-effort; keep the last snapshot */
+    } finally {
+      running = false;
+    }
+  };
+  md.addEventListener("devicechange", () => void refresh());
+  void refresh();
 }
