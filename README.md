@@ -2,11 +2,13 @@
 
 ![ByTune YouTube Music desktop app for Windows and macOS — home feed with Jump back in, library sidebar, now-playing panel and player bar](docs/screenshots/home.png)
 
-**ByTune is a free, open-source YouTube Music desktop app for Windows & macOS.** Stream music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native app.
+**ByTune is a free, open-source YouTube Music desktop app for Windows & macOS.** Stream music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native app. If ByTune has earned a spot on your taskbar, consider [giving the repo a star](https://github.com/rishiteja21/ByTune/stargazers) — it's how other people find the project.
 
 **[Download](#installation)** · **[Website](https://bytune.space/)** · **[Releases](https://github.com/rishiteja21/ByTune/releases)** · **[Contributing](CONTRIBUTING.md)** · **[License](#license)**
 
 [![Latest release](https://img.shields.io/github/v/release/rishiteja21/ByTune?label=release&color=a8324a)](https://github.com/rishiteja21/ByTune/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/rishiteja21/ByTune/total?label=downloads&color=a8324a)](https://github.com/rishiteja21/ByTune/releases)
+[![Stars](https://img.shields.io/github/stars/rishiteja21/ByTune?color=a8324a)](https://github.com/rishiteja21/ByTune/stargazers)
 [![License](https://img.shields.io/github/license/rishiteja21/ByTune?color=a8324a)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20·%20macOS%2011%2B-1f6f5c)](#installation)
 
@@ -205,6 +207,30 @@ Also available on the [website](https://bytune.space/) and the [releases page](h
 **macOS 11+ (Apple Silicon & Intel)** — the macOS edition is new. DMG and ZIP artifacts are attached to the [releases page](https://github.com/rishiteja21/ByTune/releases) as they're cut, and you can always build the current code yourself: `npm run dist:mac` produces `ByTune-<version>-arm64.dmg` / `ByTune-<version>-x64.dmg` in `release/`. On first launch of an unsigned build, right-click **ByTune.app** in Applications and choose **Open** (needed once). Signing and notarization steps live in [MAC_BUILD_AND_SIGNING.md](MAC_BUILD_AND_SIGNING.md), the distribution checklist in [DISTRIBUTION.md](DISTRIBUTION.md), and current caveats in [MAC_KNOWN_LIMITATIONS.md](MAC_KNOWN_LIMITATIONS.md).
 
 Run the installer, launch ByTune, and pick **Continue as guest** (data stays on this computer) or create an account for cloud backup.
+
+### Verify your download
+
+Every release asset has a published SHA-256 checksum. Check yours against the list below (current as of **v1.0.0**):
+
+| Asset | SHA-256 |
+|---|---|
+| `ByTune-Setup.exe` | `d68075345dc1592e44330c52c2c3b74879d8e8f813bca7a00e94759ac96c5b15` |
+| `ByTune-1.0.0-arm64.dmg` | `28231c93bbf622f8aa77a9d77d100f3e1f6c82d553fe711ed9fde1d05b68d2b5` |
+| `ByTune-1.0.0-arm64.zip` | `1e65ad446fd32ec724e32f759b2bc691f4f9d0bfa34a2879ed90f406b6b1dd42` |
+| `ByTune-1.0.0-x64.dmg` | `f0db39c7ccc973e7cf9f4827d3482017ce31af9ace8a89ad6ed7e0022605eb0f` |
+| `ByTune-1.0.0-x64.zip` | `576c8da135c458c41ccfe01d1a27dd99cadc28ea29e752c98b65453243280fc6` |
+
+```powershell
+# Windows (PowerShell)
+Get-FileHash .\ByTune-Setup.exe -Algorithm SHA256
+```
+
+```bash
+# macOS / Linux
+shasum -a 256 ByTune-1.0.0-arm64.dmg
+```
+
+The installers are unsigned (no code-signing certificate yet), so Windows SmartScreen and macOS Gatekeeper will warn on first run — the checksum table above is the way to confirm the file you downloaded is the one this project built.
 
 ### Development
 
