@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { snapshotOutputs, outputChangeAction } from "../.test-build/audio-output.mjs";
+import { snapshotOutputs, outputChangeAction, deviceChoices } from "../.test-build/audio-output.mjs";
 
 const out = (deviceId, groupId) => ({ kind: "audiooutput", deviceId, groupId });
 const mic = (deviceId, groupId) => ({ kind: "audioinput", deviceId, groupId });
@@ -111,4 +111,82 @@ test("the full disconnect-while-playing scenario, end to end", () => {
   // 4. User resumes; the same device list change cannot re-pause them.
   playing = true;
   assert.equal(outputChangeAction(prev, snap(btActive), playing), "none");
+});
+
+/* ---------------- selected sink (output picker) ---------------- */
+
+test("snapshot with a selected sink reports that device's group", () => {
+  // User routed playback to the USB DAC while the Windows default is BT.
+  const s = snapshotOutputs([...btActive, out("phys-usb", USB)], "phys-usb");
+  assert.equal(s.selectedGroup, USB, "selected wins over default");
+  assert.equal(s.defaultGroup, BT, "default is still reported");
+});
+
+test("snapshot with no selected sink aliases selectedGroup to the default", () => {
+  const s = snap(btActive);
+  assert.equal(s.selectedGroup, BT);
+  assert.equal(s.selectedGroup, s.defaultGroup);
+});
+
+test("selected (non-default) sink vanished while playing → pause", () => {
+  const withUsb = [...btActive, out("phys-usb", USB)];
+  const afterUsbGone = btActive;
+  assert.equal(outputChangeAction(snapshotOutputs(withUsb, "phys-usb"), snapshotOutputs(afterUsbGone, "phys-usb"), true, "phys-usb"), "pause");
+});
+
+test("selected sink alive while the default drifts → play on", () => {
+  const withUsb = [...btAndSpeakers, out("phys-usb", USB)];
+  const defaultMoved = [...btActive, out("phys-usb", USB)];
+  assert.equal(
+    outputChangeAction(snapshotOutputs(withUsb, "phys-usb"), snapshotOutputs(defaultMoved, "phys-usb"), true, "phys-usb"),
+    "none",
+    "routing the OS default around is not a disappearance of the chosen device"
+  );
+});
+
+test("selected sink vanished while paused → no action", () => {
+  const withUsb = [...btActive, out("phys-usb", USB)];
+  assert.equal(outputChangeAction(snapshotOutputs(withUsb, "phys-usb"), snapshotOutputs(btActive, "phys-usb"), false, "phys-usb"), "none");
+});
+
+/* ---------------- device choices (settings menu) ---------------- */
+
+test("choices: system default first, then physical outputs, virtuals skipped", () => {
+  const choices = deviceChoices([
+    out("default", SPEAKERS),
+    out("communications", SPEAKERS),
+    out("phys-speakers", SPEAKERS),
+    out("phys-bt-a2dp", BT),
+    ...btActive.map((d) => d), // duplicate default/communications again
+  ]);
+  assert.equal(choices[0].deviceId, "", "system default is the empty sink id");
+  assert.equal(choices[0].label, "System default");
+  const ids = choices.slice(1).map((c) => c.deviceId);
+  assert.deepEqual(ids, ["phys-speakers", "phys-bt-a2dp"]);
+});
+
+test("choices: unlabeled devices degrade to Speaker N instead of empty labels", () => {
+  const choices = deviceChoices([
+    out("default", SPEAKERS),
+    out("phys-a", SPEAKERS),
+    out("phys-b", BT),
+  ].map((d) => ({ ...d, label: "" })));
+  assert.deepEqual(choices.map((c) => c.label), ["System default", "Speaker 1", "Speaker 2"]);
+});
+
+test("choices: real labels are kept and trimmed", () => {
+  const choices = deviceChoices([
+    out("default", SPEAKERS),
+    { kind: "audiooutput", deviceId: "phys-1", groupId: "g1", label: "  Sennheiser HD 4.40BT  " },
+  ]);
+  assert.deepEqual(choices.map((c) => c.label), ["System default", "Sennheiser HD 4.40BT"]);
+});
+
+test("choices: devices sharing a group (endpoint pairs) appear once", () => {
+  const choices = deviceChoices([
+    out("default", BT),
+    out("phys-bt-a2dp", BT),
+    out("phys-bt-hfp", BT),
+  ]);
+  assert.equal(choices.length, 2, "default + one BT entry");
 });

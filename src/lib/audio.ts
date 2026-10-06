@@ -48,7 +48,13 @@ import { emitPlayEvent } from "./playEvents";
 import { analyseTrackHead, detectEdgeSilence } from "./analysis";
 import { upgradeArtwork } from "./artwork";
 import { createMediaKeyTap } from "./media-key-tap";
-import { outputChangeAction, snapshotOutputs, type OutputSnapshot } from "./audio-output";
+import {
+  deviceChoices,
+  outputChangeAction,
+  snapshotOutputs,
+  type OutputDeviceChoice,
+  type OutputSnapshot,
+} from "./audio-output";
 
 let elements: [HTMLAudioElement, HTMLAudioElement] | null = null;
 /** which element is the session player right now */
@@ -340,6 +346,53 @@ function applySpeed(): void {
       /* ignore */
     }
   }
+}
+
+/**
+ * Route both decks to the user's chosen output device (settings.audioSinkId).
+ * An empty string is the spec's "system default". A vanished device makes
+ * setSinkId reject — fall back to the default so resume stays audible; the
+ * output watch independently resets the setting when the chosen device
+ * disappears from enumeration.
+ */
+function applySink(): void {
+  if (!elements) return;
+  const target = useSettings.getState().audioSinkId || "";
+  for (const e of elements) {
+    // setSinkId is Chromium-only; test harnesses and exotic embeds mock plain
+    // elements — degrade to the default rather than throw.
+    if (typeof e.setSinkId !== "function") continue;
+    const current = (e as HTMLAudioElement & { readonly sinkId: string }).sinkId;
+    if (current === target) continue;
+    e.setSinkId(target).catch(() => {
+      if (target) e.setSinkId("").catch(() => undefined);
+    });
+  }
+}
+
+let labelsUnlocked = false;
+
+/**
+ * The pickable output list for the settings menu. Chromium hides device
+ * labels until the page has held capture permission once, so the first open
+ * asks for it (tracks stopped immediately) — only on explicit user intent
+ * (opening the picker), never at startup. Failure degrades to generic
+ * "Speaker N" labels instead of an empty menu.
+ */
+export async function listOutputDevices(): Promise<OutputDeviceChoice[]> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices) return [];
+  let devices = await navigator.mediaDevices.enumerateDevices();
+  if (!labelsUnlocked && devices.some((d) => d.kind === "audiooutput" && !d.label)) {
+    labelsUnlocked = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      /* keep whatever labels we have */
+    }
+  }
+  return deviceChoices(devices);
 }
 
 function updateBuffered(): void {
@@ -797,6 +850,7 @@ export function initAudioEngine(): void {
   elements = [mk(), mk()];
   applyElementVolumes(1, 0);
   applySpeed();
+  applySink();
 
   for (let i = 0; i < 2; i++) {
     const e = elements[i];
@@ -955,6 +1009,8 @@ export function initAudioEngine(): void {
 
   // Playback speed lives in settings — re-apply whenever they change.
   useSettings.subscribe(() => applySpeed());
+  // Same for the chosen output device.
+  useSettings.subscribe(() => applySink());
 
   setupMediaSession();
   setupAudioOutputWatch();
@@ -1343,10 +1399,18 @@ function setupAudioOutputWatch(): void {
     try {
       do {
         rerun = false;
-        const snap = snapshotOutputs(await md.enumerateDevices());
+        // "The output the listener is hearing" is the user's chosen sink when
+        // one is set, else the system default — see snapshotOutputs.
+        const sink = useSettings.getState().audioSinkId;
+        const snap = snapshotOutputs(await md.enumerateDevices(), sink);
         // Playing is read after the await — it may have moved while enumerating.
-        if (outputChangeAction(prev, snap, usePlayer.getState().playing) === "pause") {
+        if (outputChangeAction(prev, snap, usePlayer.getState().playing, sink) === "pause") {
           usePlayer.getState().setPlaying(false);
+          if (sink) {
+            // The chosen device is gone; fall back to the system default so
+            // the next resume is audible instead of routing into the void.
+            useSettings.getState().setAudioSinkId("");
+          }
         }
         prev = snap;
       } while (rerun);

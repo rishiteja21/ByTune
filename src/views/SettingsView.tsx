@@ -22,6 +22,7 @@ import {
   Music4,
   RefreshCw,
   SlidersHorizontal,
+  Speaker,
   Sparkles,
   Trash2,
   User,
@@ -38,6 +39,8 @@ import { useSession } from "../lib/session";
 import { setOnboardingIntent } from "../lib/onboardingIntent";
 import { GuestDeleteModal } from "../components/AccountModals";
 import { useUI, type MenuItem } from "../stores/ui";
+import { listOutputDevices } from "../lib/audio";
+import type { OutputDeviceChoice } from "../lib/audio-output";
 
 /* ============================================================ settings chrome
    Settings are inset cards of rows: an uppercase group header, a
@@ -285,6 +288,58 @@ function toggleDropdownAt(e: React.MouseEvent, items: MenuItem[]): void {
   }
   const rect = e.currentTarget.getBoundingClientRect();
   ui.openContextMenu(rect.right, rect.bottom + 6, items, { alignRight: true });
+}
+
+/** Output device — routes playback to a specific speaker/headset via
+    setSinkId. Chromium hides device labels until the page has held capture
+    permission once, so the first menu open asks for it on explicit intent;
+    failure degrades to generic "Speaker N" names. */
+function OutputDeviceGroup() {
+  const sinkId = useSettings((st) => st.audioSinkId);
+  const [devices, setDevices] = useState<OutputDeviceChoice[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void listOutputDevices().then((list) => {
+      if (alive) setDevices(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const current = devices?.find((d) => d.deviceId === sinkId);
+  const itemsFor = (list: OutputDeviceChoice[]): MenuItem[] =>
+    list.map((d) => ({
+      label: d.label,
+      icon: Check,
+      iconClassName: d.deviceId === sinkId ? "text-accent" : "opacity-0",
+      action: () => useSettings.getState().setAudioSinkId(d.deviceId),
+    }));
+  return (
+    <SettingsGroup
+      header="Audio output"
+      footer="Playback follows the device you pick. If it disappears (headset unplugged, Bluetooth dropped), playback pauses and the setting falls back to the system default."
+    >
+      <SettingsRow
+        icon={Speaker}
+        title="Output device"
+        subtitle="Speakers, headsets, HDMI — where sound comes out"
+        value={current ? current.label : "System default"}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          // Rect must be captured synchronously — React nulls currentTarget
+          // once the handler returns, before the async list resolves.
+          const rect = e.currentTarget.getBoundingClientRect();
+          const ui = useUI.getState();
+          const wasOpen = !!ui.contextMenu;
+          void listOutputDevices().then((list) => {
+            setDevices(list);
+            if (wasOpen) return; // the click's job was to close the open menu
+            ui.openContextMenu(rect.right, rect.bottom + 6, itemsFor(list), { alignRight: true });
+          });
+        }}
+      />
+    </SettingsGroup>
+  );
 }
 
 /**
@@ -601,6 +656,8 @@ export function SettingsView() {
           }
         />
       </SettingsGroup>
+
+      <OutputDeviceGroup />
 
       <SettingsGroup
         header="Downloads"

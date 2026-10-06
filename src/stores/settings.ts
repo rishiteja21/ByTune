@@ -33,6 +33,8 @@ interface SettingsState {
   autoplay: boolean;
   /** 0.5..2 — persisted playback speed (pitch-preserving) */
   playbackSpeed: number;
+  /** Audio output device (setSinkId). "" follows the system default. */
+  audioSinkId: string;
 
   /* Appearance */
   reduceAnimation: boolean;
@@ -61,6 +63,7 @@ interface SettingsState {
   setSkipSilence(v: boolean): void;
   setAutoplay(v: boolean): void;
   setPlaybackSpeed(v: number): void;
+  setAudioSinkId(sinkId: string): void;
   setReduceAnimation(v: boolean): void;
   setReduceDynamicBlur(v: boolean): void;
   setLiquidGlass(v: boolean): void;
@@ -88,6 +91,7 @@ export const useSettings = create<SettingsState>()(
       skipSilence: false,
       autoplay: false,
       playbackSpeed: 1,
+      audioSinkId: "",
 
       reduceAnimation: false,
       reduceDynamicBlur: false,
@@ -113,6 +117,7 @@ export const useSettings = create<SettingsState>()(
       setSkipSilence: (skipSilence) => set({ skipSilence }),
       setAutoplay: (autoplay) => set({ autoplay }),
       setPlaybackSpeed: (playbackSpeed) => set({ playbackSpeed: Math.min(2, Math.max(0.5, playbackSpeed)) }),
+      setAudioSinkId: (audioSinkId) => set({ audioSinkId }),
       setReduceAnimation: (reduceAnimation) => set({ reduceAnimation }),
       setReduceDynamicBlur: (reduceDynamicBlur) => set({ reduceDynamicBlur }),
       setLiquidGlass: (liquidGlass) => set({ liquidGlass }),
