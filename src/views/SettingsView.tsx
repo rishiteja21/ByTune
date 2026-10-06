@@ -299,11 +299,18 @@ function OutputDeviceGroup() {
   const [devices, setDevices] = useState<OutputDeviceChoice[] | null>(null);
   useEffect(() => {
     let alive = true;
-    void listOutputDevices().then((list) => {
-      if (alive) setDevices(list);
-    });
+    const refresh = (): void => {
+      void listOutputDevices().then((list) => {
+        if (alive) setDevices(list);
+      });
+    };
+    refresh();
+    // Plugging or unplugging a device must update the row and the menu live.
+    const md = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+    md?.addEventListener?.("devicechange", refresh);
     return () => {
       alive = false;
+      md?.removeEventListener?.("devicechange", refresh);
     };
   }, []);
   const current = devices?.find((d) => d.deviceId === sinkId);
@@ -326,14 +333,18 @@ function OutputDeviceGroup() {
         value={current ? current.label : "System default"}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
-          // Rect must be captured synchronously — React nulls currentTarget
-          // once the handler returns, before the async list resolves.
+          // Same toggle contract as the quality rows: a click on the row
+          // closes the open menu; otherwise the list resolves (async) and the
+          // menu opens anchored to the row. The rect is captured
+          // synchronously — React nulls currentTarget after the handler.
           const rect = e.currentTarget.getBoundingClientRect();
           const ui = useUI.getState();
-          const wasOpen = !!ui.contextMenu;
+          if (ui.contextMenu) {
+            ui.closeContextMenu();
+            return;
+          }
           void listOutputDevices().then((list) => {
             setDevices(list);
-            if (wasOpen) return; // the click's job was to close the open menu
             ui.openContextMenu(rect.right, rect.bottom + 6, itemsFor(list), { alignRight: true });
           });
         }}

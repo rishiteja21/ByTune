@@ -365,31 +365,48 @@ function applySink(): void {
     const current = (e as HTMLAudioElement & { readonly sinkId: string }).sinkId;
     if (current === target) continue;
     e.setSinkId(target).catch(() => {
-      if (target) e.setSinkId("").catch(() => undefined);
+      if (!target) return;
+      // Windows re-issues endpoint ids around device switches, so a just-set
+      // sink can reject transiently. Retry once the enumeration settles;
+      // only then fall back to the default.
+      window.setTimeout(() => {
+        e.setSinkId(target).catch(() => e.setSinkId("").catch(() => undefined));
+      }, 300);
     });
   }
 }
 
 let labelsUnlocked = false;
 
+/** Chromium hides labels AND hands out empty deviceIds until the page has
+    held capture permission once — without the unlock the picker can list
+    endpoints it cannot route to. */
+function needsLabelUnlock(devices: readonly MediaDeviceInfo[]): boolean {
+  return devices.some((d) => d.kind === "audiooutput" && (!d.deviceId || !d.label));
+}
+
 /**
  * The pickable output list for the settings menu. Chromium hides device
  * labels until the page has held capture permission once, so the first open
  * asks for it (tracks stopped immediately) — only on explicit user intent
  * (opening the picker), never at startup. Failure degrades to generic
- * "Speaker N" labels instead of an empty menu.
+ * "Speaker N" labels, and the unlock retries on later opens (e.g. after the
+ * user enables microphone access in Windows settings) instead of being
+ * permanently written off after one failure.
  */
 export async function listOutputDevices(): Promise<OutputDeviceChoice[]> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices) return [];
   let devices = await navigator.mediaDevices.enumerateDevices();
-  if (!labelsUnlocked && devices.some((d) => d.kind === "audiooutput" && !d.label)) {
-    labelsUnlocked = true;
+  if (!labelsUnlocked && needsLabelUnlock(devices)) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
       devices = await navigator.mediaDevices.enumerateDevices();
+      // Only retire the unlock when it actually produced ids + labels —
+      // an OS-level refusal (Windows microphone privacy) stays retryable.
+      labelsUnlocked = !needsLabelUnlock(devices);
     } catch {
-      /* keep whatever labels we have */
+      /* keep whatever labels we have; retry on the next open */
     }
   }
   return deviceChoices(devices);
@@ -1412,6 +1429,10 @@ function setupAudioOutputWatch(): void {
             useSettings.getState().setAudioSinkId("");
           }
         }
+        // Re-assert the chosen sink after any device-list change — Windows
+        // hands a reconnecting Bluetooth device a NEW endpoint id, which
+        // quietly invalidates the previously-applied sink.
+        applySink();
         prev = snap;
       } while (rerun);
     } catch {

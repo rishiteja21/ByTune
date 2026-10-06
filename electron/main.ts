@@ -813,6 +813,15 @@ if (!gotLock) {
     if (pendingOAuthUrl) oauthFromUrl(pendingOAuthUrl);
     pendingOAuthUrl = undefined;
     stripMediaReferer();
+    // Output-device picker: Chromium hides device labels/ids behind a capture
+    // permission, and the renderer's one-time getUserMedia unlock is only
+    // deterministic if the session approves it — Electron's implicit default
+    // made that depend on build flags. Keep Electron's approve-all behavior
+    // but pinned explicitly, so the picker works the same everywhere.
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(true);
+    });
+    session.defaultSession.setPermissionCheckHandler(() => true);
     registerIpc();
     // Replay lives behind registerIpc's write hook: initStats runs the
     // one-time legacy recovery, and any months it recovers must be announced
