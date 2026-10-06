@@ -7,6 +7,7 @@
  *                     as PNG)
  *   build/icon.icns — macOS size ladder 16-1024 incl. Retina @2x variants,
  *                     PNG-based (what iconutil itself emits)
+ *   installerHeader.bmp / installerSidebar.bmp — NSIS assisted-wizard art
  * Windows surfaces (Start menu previews, taskbar, UAC, the NSIS installer)
  * each request one specific size; the ico must carry that size natively or
  * the requester scales whatever closest entry it finds, which is what blurs
@@ -24,17 +25,11 @@ mkdirSync(buildDir, { recursive: true });
 
 const svg = readFileSync(join(root, "src", "assets", "brand", "bytune-logo.svg"), "utf8");
 
-/* ---------- render the mark centered on a square transparent canvas ---------- */
+/* ---------- render the mark (white on transparent) ---------- */
 
-const squareCache = new Map();
-function renderSquare(size) {
-  const cached = squareCache.get(size);
-  if (cached) return cached;
-
-  // The source SVG is ~0.85:1. Fit it to the full canvas height and center it
-  // horizontally so the mark fills the square icon canvas.
+function renderMark(height) {
   const resvg = new Resvg(svg, {
-    fitTo: { mode: "height", value: size },
+    fitTo: { mode: "height", value: height },
     background: "rgba(0,0,0,0)",
     // Pure-path artwork, no <text>: skipping the system font scan keeps a
     // dozen per-size renders from each paying for a full font database.
@@ -43,24 +38,36 @@ function renderSquare(size) {
   const rendered = resvg.render();
   const srcW = rendered.width;
   const srcH = rendered.height;
-  if (srcH !== size) throw new Error(`expected height ${size}, got ${srcH}`);
+  if (srcH !== height) throw new Error(`expected height ${height}, got ${srcH}`);
 
   // Read the pixel buffer once: `rendered.pixels` is a copying getter, so
   // touching it per-pixel in the loop below re-copies the whole image and
   // exhausts memory.
-  const srcPixels = rendered.pixels; // RGBA, width*height*4
+  const rgba = Buffer.alloc(srcW * srcH * 4);
+  rgba.set(rendered.pixels); // RGBA, width*height*4
+  return { width: srcW, height: srcH, rgba };
+}
+
+/* ---------- compose the mark centered on a square transparent canvas ---------- */
+
+const squareCache = new Map();
+function renderSquare(size) {
+  const cached = squareCache.get(size);
+  if (cached) return cached;
+
+  const mark = renderMark(size);
   const rgba = Buffer.alloc(size * size * 4);
-  const xOff = Math.floor((size - srcW) / 2);
-  for (let y = 0; y < srcH; y++) {
-    const srcRow = y * srcW * 4;
+  const xOff = Math.floor((size - mark.width) / 2);
+  for (let y = 0; y < mark.height; y++) {
+    const srcRow = y * mark.width * 4;
     const dstRow = y * size * 4;
-    for (let x = 0; x < srcW; x++) {
+    for (let x = 0; x < mark.width; x++) {
       const si = srcRow + x * 4;
       const di = dstRow + (x + xOff) * 4;
-      rgba[di] = srcPixels[si];
-      rgba[di + 1] = srcPixels[si + 1];
-      rgba[di + 2] = srcPixels[si + 2];
-      rgba[di + 3] = srcPixels[si + 3];
+      rgba[di] = mark.rgba[si];
+      rgba[di + 1] = mark.rgba[si + 1];
+      rgba[di + 2] = mark.rgba[si + 2];
+      rgba[di + 3] = mark.rgba[si + 3];
     }
   }
   squareCache.set(size, rgba);
@@ -210,12 +217,76 @@ function buildICNS() {
   return Buffer.concat([header, ...chunks]);
 }
 
+/* ---------- installer bitmaps for the NSIS assisted UI ---------- */
+
+// BMP file: BITMAPFILEHEADER + BITMAPINFOHEADER + bottom-up BGRA rows.
+// Always opaque: the wizard header strip and welcome sidebar are solid
+// panels, and 32bpp BI_RGB is the most widely decoded BMP flavour.
+function encodeBMP(width, height, pixels) {
+  const stride = width * 4;
+  const header = Buffer.alloc(54);
+  header.write("BM", 0, "ascii");
+  header.writeUInt32LE(54 + stride * height, 2);
+  header.writeUInt32LE(54, 10); // bfOffBits
+  header.writeUInt32LE(40, 14); // BITMAPINFOHEADER
+  header.writeInt32LE(width, 18);
+  header.writeInt32LE(height, 22);
+  header.writeUInt16LE(1, 26); // planes
+  header.writeUInt16LE(32, 28); // bpp
+  header.writeUInt32LE(0, 30); // BI_RGB
+  header.writeUInt32LE(stride * height, 34);
+  const body = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const srcRow = (height - 1 - y) * stride; // bottom-up
+    pixels.copy(body, y * stride, srcRow, srcRow + stride);
+  }
+  return Buffer.concat([header, body]);
+}
+
+// Solid panel with the mark centered on it. The mark renders white, so the
+// composite is bg*(1-a) + ink*a — e.g. an ink mark on the white header strip
+// (white-on-white would be invisible, which is exactly the ghosted logo the
+// default NSIS header icon produced).
+function panelBMP(width, height, bg, ink, markHeight) {
+  const px = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    px[i * 4] = bg[0];
+    px[i * 4 + 1] = bg[1];
+    px[i * 4 + 2] = bg[2];
+    px[i * 4 + 3] = 255;
+  }
+  const mark = renderMark(markHeight);
+  const xOff = Math.floor((width - mark.width) / 2);
+  const yOff = Math.floor((height - mark.height) / 2);
+  for (let y = 0; y < mark.height; y++) {
+    for (let x = 0; x < mark.width; x++) {
+      const si = (y * mark.width + x) * 4;
+      const a = mark.rgba[si + 3] / 255;
+      const di = ((yOff + y) * width + (xOff + x)) * 4;
+      px[di] = Math.round(bg[0] + (ink[0] - bg[0]) * a);
+      px[di + 1] = Math.round(bg[1] + (ink[1] - bg[1]) * a);
+      px[di + 2] = Math.round(bg[2] + (ink[2] - bg[2]) * a);
+      px[di + 3] = 255;
+    }
+  }
+  return encodeBMP(width, height, px);
+}
+
 /* ---------- outputs ---------- */
 
 writeFileSync(join(buildDir, "icon.png"), encodePNG(512, 512, renderSquare(512)));
 writeFileSync(join(buildDir, "icon.ico"), buildICO());
 writeFileSync(join(buildDir, "icon.icns"), buildICNS());
 
+// NSIS assisted installer: header strip bitmap (documented 150x57) and the
+// welcome/finish sidebar (164x314, also used by the uninstaller). Without
+// these electron-builder falls back to the header icon (a white logo ghosted
+// onto the white strip) and the stock NSIS sidebar art.
+writeFileSync(join(buildDir, "installerHeader.bmp"), panelBMP(150, 57, [255, 255, 255], [30, 30, 30], 44));
+writeFileSync(join(buildDir, "installerSidebar.bmp"), panelBMP(164, 314, [30, 30, 30], [255, 255, 255], 76));
+
 console.log(
-  "Wrote build/icon.png (512), build/icon.ico (sizes " + ICO_SIZES.join(", ") + ") and build/icon.icns (16-1024)"
+  "Wrote build/icon.png (512), build/icon.ico (sizes " +
+    ICO_SIZES.join(", ") +
+    "), build/icon.icns (16-1024), installerHeader.bmp (150x57) and installerSidebar.bmp (164x314)"
 );
