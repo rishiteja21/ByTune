@@ -2,7 +2,7 @@
 
 ![ByTune YouTube Music desktop app for Windows and macOS — home feed with Jump back in, library sidebar, now-playing panel and player bar](docs/screenshots/home.png)
 
-**ByTune is a free, open-source YouTube Music desktop app for Windows & macOS.** Stream music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native app. If ByTune has earned a spot on your taskbar, consider [giving the repo a star](https://github.com/rishiteja21/ByTune/stargazers) — it's how other people find the project.
+**ByTune is a free, open-source YouTube Music desktop app for Windows & macOS.** Stream music, keep your own library, and get word-synced lyrics, a fullscreen player, a mini player and real downloads — in one fast, native app. If ByTune has earned a spot on your taskbar, consider starring the repo (the ★ button, top right) — it's how other people find the project.
 
 **[Download](#installation)** · **[Website](https://bytune.space/)** · **[Releases](https://github.com/rishiteja21/ByTune/releases)** · **[Contributing](CONTRIBUTING.md)** · **[License](#license)**
 
