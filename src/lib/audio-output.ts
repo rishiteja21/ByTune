@@ -57,6 +57,8 @@ export interface OutputDeviceChoice {
   deviceId: string;
   label: string;
   isDefault: boolean;
+  /** true for the physical endpoint the OS is currently routing "default" to */
+  activeDefault?: boolean;
 }
 
 export function snapshotOutputs(devices: readonly DeviceInfoLike[], selectedSinkId = ""): OutputSnapshot {
@@ -102,10 +104,21 @@ export function outputChangeAction(
  * The pickable output list for the settings menu: "System default" first,
  * then every physical output endpoint. Chromium hides device labels until
  * the page has been granted capture permission once, so unlabeled entries
- * degrade to "Speaker N" instead of blocking the picker.
+ * degrade to "Speaker N" instead of blocking the picker. The physical
+ * endpoint the OS currently routes "default" to is flagged `activeDefault`
+ * so the UI can show where "System default" actually leads right now.
  */
 export function deviceChoices(devices: readonly DeviceInfoLike[]): OutputDeviceChoice[] {
-  const choices: OutputDeviceChoice[] = [{ deviceId: "", label: "System default", isDefault: true }];
+  let defaultGroup: string | null = null;
+  for (const d of devices) {
+    if (d.kind === "audiooutput" && d.deviceId === "default") {
+      defaultGroup = d.groupId || null;
+      break;
+    }
+  }
+  const choices: OutputDeviceChoice[] = [
+    { deviceId: "", label: "System default", isDefault: true, activeDefault: true },
+  ];
   const seen = new Set<string>();
   let unnamed = 0;
   for (const d of devices) {
@@ -119,6 +132,7 @@ export function deviceChoices(devices: readonly DeviceInfoLike[]): OutputDeviceC
       deviceId: d.deviceId,
       label: label || `Speaker ${++unnamed}`,
       isDefault: false,
+      activeDefault: defaultGroup !== null && d.groupId === defaultGroup,
     });
   }
   return choices;

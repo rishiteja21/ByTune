@@ -314,9 +314,15 @@ function OutputDeviceGroup() {
     };
   }, []);
   const current = devices?.find((d) => d.deviceId === sinkId);
+  // Where sound is going RIGHT NOW: the pinned device, or — when following
+  // the system default — whichever physical endpoint the OS currently routes
+  // "default" to. Resolving this is what makes the row move when Windows
+  // hands the default to a newly connected headset.
+  const active = devices?.find((d) => d.deviceId !== "" && d.activeDefault);
+  const value = sinkId ? (current?.label ?? "System default") : active ? active.label : "System default";
   const itemsFor = (list: OutputDeviceChoice[]): MenuItem[] =>
     list.map((d) => ({
-      label: d.label,
+      label: d.deviceId === "" && active ? `System default — ${active.label}` : d.label,
       icon: Check,
       iconClassName: d.deviceId === sinkId ? "text-accent" : "opacity-0",
       action: () => useSettings.getState().setAudioSinkId(d.deviceId),
@@ -329,8 +335,8 @@ function OutputDeviceGroup() {
       <SettingsRow
         icon={Speaker}
         title="Output device"
-        subtitle="Speakers, headsets, HDMI — where sound comes out"
-        value={current ? current.label : "System default"}
+        subtitle={sinkId ? "Pinned to this device" : "Following the system default"}
+        value={devices ? value : "System default"}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           // Same toggle contract as the quality rows: a click on the row

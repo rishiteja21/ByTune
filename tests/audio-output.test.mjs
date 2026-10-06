@@ -190,3 +190,16 @@ test("choices: devices sharing a group (endpoint pairs) appear once", () => {
   ]);
   assert.equal(choices.length, 2, "default + one BT entry");
 });
+
+test("choices: the endpoint the OS default points at is flagged activeDefault", () => {
+  const choices = deviceChoices(btActive); // Windows default = BT
+  assert.equal(choices.find((c) => c.deviceId === "").activeDefault, true, "following the default");
+  assert.equal(choices.find((c) => c.deviceId === "phys-bt-a2dp").activeDefault, true, "BT backs the default");
+  assert.equal(choices.find((c) => c.deviceId === "phys-speakers").activeDefault, false);
+});
+
+test("choices: activeDefault moves with the OS default", () => {
+  const onSpeakers = deviceChoices(btAndSpeakers); // default = speakers, BT connected
+  assert.equal(onSpeakers.find((c) => c.deviceId === "phys-speakers").activeDefault, true);
+  assert.equal(onSpeakers.find((c) => c.deviceId === "phys-bt-a2dp").activeDefault, false);
+});
