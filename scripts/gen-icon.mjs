@@ -1,6 +1,7 @@
 /**
- * Generates the ByTune app icons from src/assets/brand/bytune-logo.svg
- * (white on transparent):
+ * Generates the ByTune app icons from src/assets/brand/bytune-icon.svg
+ * (full badge design — rounded gradient tile with the white mark, on
+ * transparent):
  *   build/icon.png  — 512x512 master used for the runtime window/Dock icon
  *   build/icon.ico  — Windows size ladder 16-256: BMP entries up to 128,
  *                     PNG-compressed 256 (the only size the ICO spec allows
@@ -23,9 +24,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const buildDir = join(root, "build");
 mkdirSync(buildDir, { recursive: true });
 
-const svg = readFileSync(join(root, "src", "assets", "brand", "bytune-logo.svg"), "utf8");
+const svg = readFileSync(join(root, "src", "assets", "brand", "bytune-icon.svg"), "utf8");
 
-/* ---------- render the mark (white on transparent) ---------- */
+/* ---------- render the badge artwork ---------- */
 
 function renderMark(height) {
   const resvg = new Resvg(svg, {
@@ -48,19 +49,27 @@ function renderMark(height) {
   return { width: srcW, height: srcH, rgba };
 }
 
-/* ---------- compose the mark centered on a square transparent canvas ---------- */
+/* ---------- compose the badge centered on a square transparent canvas ---------- */
 
-const squareCache = new Map();
-function renderSquare(size) {
-  const cached = squareCache.get(size);
+const fitCache = new Map();
+/**
+ * Render the square badge onto a size×size transparent canvas. contentScale
+ * < 1 shrinks the badge inside the canvas: macOS expects the tile to occupy
+ * ~824/1024 of the icon canvas so it sits evenly beside Apple's own Dock
+ * icons; Windows wants full bleed.
+ */
+function renderFit(size, contentScale = 1) {
+  const key = size + "@" + contentScale;
+  const cached = fitCache.get(key);
   if (cached) return cached;
 
-  const mark = renderMark(size);
+  const mark = renderMark(Math.round(size * contentScale));
   const rgba = Buffer.alloc(size * size * 4);
   const xOff = Math.floor((size - mark.width) / 2);
+  const yOff = Math.floor((size - mark.height) / 2);
   for (let y = 0; y < mark.height; y++) {
     const srcRow = y * mark.width * 4;
-    const dstRow = y * size * 4;
+    const dstRow = (y + yOff) * size * 4;
     for (let x = 0; x < mark.width; x++) {
       const si = srcRow + x * 4;
       const di = dstRow + (x + xOff) * 4;
@@ -70,7 +79,7 @@ function renderSquare(size) {
       rgba[di + 3] = mark.rgba[si + 3];
     }
   }
-  squareCache.set(size, rgba);
+  fitCache.set(key, rgba);
   return rgba;
 }
 
@@ -157,7 +166,7 @@ const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 72, 96, 128, 256];
 
 function buildICO() {
   const images = ICO_SIZES.map((size) => {
-    const rgba = renderSquare(size);
+    const rgba = renderFit(size);
     // PNG compression is only spec-sanctioned for the 256 entry; smaller ones
     // must be BMP so every legacy consumer can decode them.
     return size === 256 ? encodePNG(size, size, rgba) : bmpEntry(size, rgba);
@@ -202,9 +211,12 @@ const ICNS_TYPES = [
   ["ic14", 512], // 256x256@2x
 ];
 
+/** Apple's icon grid: the tile occupies 824 of the 1024px canvas. */
+const MAC_CONTENT = 824 / 1024;
+
 function buildICNS() {
   const chunks = ICNS_TYPES.map(([type, size]) => {
-    const data = encodePNG(size, size, renderSquare(size));
+    const data = encodePNG(size, size, renderFit(size, MAC_CONTENT));
     const head = Buffer.alloc(8);
     head.write(type, 0, "ascii");
     head.writeUInt32BE(8 + data.length, 4);
@@ -238,16 +250,28 @@ function encodeBMP(width, height, pixels) {
   const body = Buffer.alloc(stride * height);
   for (let y = 0; y < height; y++) {
     const srcRow = (height - 1 - y) * stride; // bottom-up
-    pixels.copy(body, y * stride, srcRow, srcRow + stride);
+    const dstRow = y * stride;
+    pixels.copy(body, dstRow, srcRow, srcRow + stride);
+    // BMP stores BGRA; the pixel buffers are RGBA. The old symmetric colors
+    // (pure white / flat gray) hid the difference — the gradient tile needs
+    // the swap or its hue shifts.
+    for (let x = 0; x < width; x++) {
+      const di = dstRow + x * 4;
+      const r = body[di];
+      body[di] = body[di + 2];
+      body[di + 2] = r;
+    }
   }
   return Buffer.concat([header, body]);
 }
 
-// Solid panel with the mark centered on it. The mark renders white, so the
-// composite is bg*(1-a) + ink*a — e.g. an ink mark on the white header strip
-// (white-on-white would be invisible, which is exactly the ghosted logo the
-// default NSIS header icon produced).
-function panelBMP(width, height, bg, ink, markHeight) {
+// Solid panel with the badge centered on it, composited in its true colors:
+// out = bg*(1-a) + badge*a per channel. (The previous white mark needed ink
+// substitution — a white mark on the white header strip was invisible, the
+// "ghosted logo" the default NSIS header icon produced. The badge carries
+// its own tile background, so straight alpha compositing works on both the
+// white header strip and the dark sidebar.)
+function panelBMP(width, height, bg, markHeight) {
   const px = Buffer.alloc(width * height * 4);
   for (let i = 0; i < width * height; i++) {
     px[i * 4] = bg[0];
@@ -255,17 +279,20 @@ function panelBMP(width, height, bg, ink, markHeight) {
     px[i * 4 + 2] = bg[2];
     px[i * 4 + 3] = 255;
   }
-  const mark = renderMark(markHeight);
-  const xOff = Math.floor((width - mark.width) / 2);
-  const yOff = Math.floor((height - mark.height) / 2);
-  for (let y = 0; y < mark.height; y++) {
-    for (let x = 0; x < mark.width; x++) {
-      const si = (y * mark.width + x) * 4;
-      const a = mark.rgba[si + 3] / 255;
+  // renderFit returns a square size×size RGBA buffer (no width/height
+  // fields) — the badge side is markHeight by construction.
+  const badge = renderFit(markHeight);
+  const xOff = Math.floor((width - markHeight) / 2);
+  const yOff = Math.floor((height - markHeight) / 2);
+  for (let y = 0; y < markHeight; y++) {
+    const srcRow = y * markHeight * 4;
+    for (let x = 0; x < markHeight; x++) {
+      const si = srcRow + x * 4;
+      const a = badge[si + 3] / 255;
       const di = ((yOff + y) * width + (xOff + x)) * 4;
-      px[di] = Math.round(bg[0] + (ink[0] - bg[0]) * a);
-      px[di + 1] = Math.round(bg[1] + (ink[1] - bg[1]) * a);
-      px[di + 2] = Math.round(bg[2] + (ink[2] - bg[2]) * a);
+      px[di] = Math.round(bg[0] + (badge[si] - bg[0]) * a);
+      px[di + 1] = Math.round(bg[1] + (badge[si + 1] - bg[1]) * a);
+      px[di + 2] = Math.round(bg[2] + (badge[si + 2] - bg[2]) * a);
       px[di + 3] = 255;
     }
   }
@@ -274,7 +301,7 @@ function panelBMP(width, height, bg, ink, markHeight) {
 
 /* ---------- outputs ---------- */
 
-writeFileSync(join(buildDir, "icon.png"), encodePNG(512, 512, renderSquare(512)));
+writeFileSync(join(buildDir, "icon.png"), encodePNG(512, 512, renderFit(512)));
 writeFileSync(join(buildDir, "icon.ico"), buildICO());
 writeFileSync(join(buildDir, "icon.icns"), buildICNS());
 
@@ -282,8 +309,8 @@ writeFileSync(join(buildDir, "icon.icns"), buildICNS());
 // welcome/finish sidebar (164x314, also used by the uninstaller). Without
 // these electron-builder falls back to the header icon (a white logo ghosted
 // onto the white strip) and the stock NSIS sidebar art.
-writeFileSync(join(buildDir, "installerHeader.bmp"), panelBMP(150, 57, [255, 255, 255], [30, 30, 30], 44));
-writeFileSync(join(buildDir, "installerSidebar.bmp"), panelBMP(164, 314, [30, 30, 30], [255, 255, 255], 76));
+writeFileSync(join(buildDir, "installerHeader.bmp"), panelBMP(150, 57, [255, 255, 255], 44));
+writeFileSync(join(buildDir, "installerSidebar.bmp"), panelBMP(164, 314, [30, 30, 30], 76));
 
 console.log(
   "Wrote build/icon.png (512), build/icon.ico (sizes " +
