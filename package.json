@@ -34,7 +34,8 @@
     "files": [
       "dist/**",
       "dist-electron/**",
-      "build/icon.png"
+      "build/icon.png",
+      "build/icon.ico"
     ],
     "win": {
       "target": "nsis",
@@ -58,7 +59,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.icns",
       "category": "public.app-category.music",
       "artifactName": "ByTune-${version}-${arch}.${ext}",
       "darkModeSupport": true,

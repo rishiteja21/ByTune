@@ -55,7 +55,11 @@ let drainStarted = false;
 let dataResetActive = false;
 
 function iconPath(): string | undefined {
-  const p = path.join(app.getAppPath(), "build", "icon.png");
+  // Windows: give the window the multi-size .ico so the shell can pick
+  // exact-size bitmaps for the taskbar button and preview thumbnails instead
+  // of scaling a single raster. macOS keeps the .png (Dock setIcon).
+  const name = process.platform === "win32" ? "icon.ico" : "icon.png";
+  const p = path.join(app.getAppPath(), "build", name);
   return fs.existsSync(p) ? p : undefined;
 }
 
