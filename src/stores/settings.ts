@@ -35,6 +35,9 @@ interface SettingsState {
   playbackSpeed: number;
   /** Audio output device (setSinkId). "" follows the system default. */
   audioSinkId: string;
+  /** 10-band graphic EQ; gains in dB (−12..+12), one per EQ_BANDS entry */
+  eqEnabled: boolean;
+  eqGains: number[];
 
   /* Appearance */
   reduceAnimation: boolean;
@@ -64,6 +67,8 @@ interface SettingsState {
   setAutoplay(v: boolean): void;
   setPlaybackSpeed(v: number): void;
   setAudioSinkId(sinkId: string): void;
+  setEqEnabled(v: boolean): void;
+  setEqGains(gains: number[]): void;
   setReduceAnimation(v: boolean): void;
   setReduceDynamicBlur(v: boolean): void;
   setLiquidGlass(v: boolean): void;
@@ -92,6 +97,8 @@ export const useSettings = create<SettingsState>()(
       autoplay: false,
       playbackSpeed: 1,
       audioSinkId: "",
+      eqEnabled: false,
+      eqGains: Array(10).fill(0),
 
       reduceAnimation: false,
       reduceDynamicBlur: false,
@@ -118,6 +125,8 @@ export const useSettings = create<SettingsState>()(
       setAutoplay: (autoplay) => set({ autoplay }),
       setPlaybackSpeed: (playbackSpeed) => set({ playbackSpeed: Math.min(2, Math.max(0.5, playbackSpeed)) }),
       setAudioSinkId: (audioSinkId) => set({ audioSinkId }),
+      setEqEnabled: (eqEnabled) => set({ eqEnabled }),
+      setEqGains: (eqGains) => set({ eqGains: eqGains.map((g) => Math.min(12, Math.max(-12, g))) }),
       setReduceAnimation: (reduceAnimation) => set({ reduceAnimation }),
       setReduceDynamicBlur: (reduceDynamicBlur) => set({ reduceDynamicBlur }),
       setLiquidGlass: (liquidGlass) => set({ liquidGlass }),
