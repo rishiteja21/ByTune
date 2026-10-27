@@ -358,6 +358,15 @@ function applySpeed(): void {
 function applySink(): void {
   if (!elements) return;
   const target = useSettings.getState().audioSinkId || "";
+  // Once the EQ graph owns the decks, the element sinks are bypassed: the
+  // context's own sink is the one that reaches the speakers.
+  if (eqCtx) {
+    const ctx = eqCtx as AudioContext & { sinkId?: string; setSinkId?: (id: string) => Promise<void> };
+    if (typeof ctx.setSinkId === "function" && ctx.sinkId !== target) {
+      ctx.setSinkId(target).catch(() => ctx.setSinkId!("").catch(() => undefined));
+    }
+    return;
+  }
   for (const e of elements) {
     // setSinkId is Chromium-only; test harnesses and exotic embeds mock plain
     // elements — degrade to the default rather than throw.
@@ -374,6 +383,68 @@ function applySink(): void {
       }, 300);
     });
   }
+}
+
+/* ============================ equalizer ============================ */
+
+/** Band centres (Hz) of the 10-band graphic EQ; settings.eqGains maps 1:1. */
+export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+let eqCtx: AudioContext | null = null;
+let eqFilters: BiquadFilterNode[] = [];
+let eqLimiter: DynamicsCompressorNode | null = null;
+let eqLimited = false;
+
+/**
+ * Both decks → 10 biquads → (limiter while any band is boosted) → speakers. Element volume is applied
+ * before a MediaElementSource (verified on Electron's Chromium), so the
+ * gain/fade/normalisation logic above keeps working through the graph.
+ * Built on first enable only: a deck can never be detached from its source
+ * node again, so turning the EQ off afterwards just flattens the bands
+ * (0 dB biquads are transparent).
+ */
+function applyEq(): void {
+  if (!elements) return;
+  const { eqEnabled, eqGains } = useSettings.getState();
+  if (!eqCtx) {
+    if (!eqEnabled) return;
+    const ctx = new AudioContext();
+    eqCtx = ctx;
+    // Brick-wall-ish limiter instead of a preamp: a preamp pulled the whole
+    // signal down by the largest boost, so every boost made playback quieter.
+    // This only touches the peaks a boost pushes past full scale.
+    eqLimiter = ctx.createDynamicsCompressor();
+    eqLimiter.threshold.value = -0.5;
+    eqLimiter.knee.value = 0;
+    eqLimiter.ratio.value = 20;
+    eqLimiter.attack.value = 0.002;
+    eqLimiter.release.value = 0.15;
+    eqLimiter.connect(ctx.destination);
+    eqFilters = EQ_BANDS.map((freq, i) => {
+      const f = ctx.createBiquadFilter();
+      f.type = i === 0 ? "lowshelf" : i === EQ_BANDS.length - 1 ? "highshelf" : "peaking";
+      f.frequency.value = freq;
+      f.Q.value = 1.41; // one-octave bands
+      return f;
+    });
+    for (const e of elements) ctx.createMediaElementSource(e).connect(eqFilters[0]);
+    for (let i = 1; i < eqFilters.length; i++) eqFilters[i - 1].connect(eqFilters[i]);
+    eqFilters[eqFilters.length - 1].connect(ctx.destination);
+    applySink();
+  }
+  const gains = eqEnabled ? eqGains : [];
+  const t = eqCtx.currentTime;
+  eqFilters.forEach((f, i) => f.gain.setTargetAtTime(gains[i] ?? 0, t, 0.02));
+  // The limiter sits in the path only while something is boosted, so a flat
+  // or cut-only EQ (and EQ off) stays bit-transparent.
+  const limit = gains.some((g) => g > 0);
+  if (limit !== eqLimited) {
+    const last = eqFilters[eqFilters.length - 1];
+    last.disconnect();
+    last.connect(limit ? eqLimiter! : eqCtx.destination);
+    eqLimited = limit;
+  }
+  if (eqCtx.state === "suspended") void eqCtx.resume();
 }
 
 let labelsUnlocked = false;
@@ -862,6 +933,10 @@ export function initAudioEngine(): void {
   const mk = (): HTMLAudioElement => {
     const a = new Audio();
     a.preload = "auto";
+    // CORS mode, so the EQ graph can read the proxy's audio: a no-cors
+    // cross-origin source feeds Web Audio silence. The proxy answers
+    // Access-Control-Allow-Origin: * on every route.
+    a.crossOrigin = "anonymous";
     return a;
   };
   elements = [mk(), mk()];
@@ -887,6 +962,7 @@ export function initAudioEngine(): void {
       if (i === mainIdx) usePlayer.getState()._setBuffering(false);
     });
     e.addEventListener("playing", () => {
+      if (eqCtx?.state === "suspended") void eqCtx.resume();
       if (i !== mainIdx) return;
       usePlayer.getState()._setBuffering(false);
       consecutiveFailures = 0;
@@ -1028,6 +1104,10 @@ export function initAudioEngine(): void {
   useSettings.subscribe(() => applySpeed());
   // Same for the chosen output device.
   useSettings.subscribe(() => applySink());
+  applyEq();
+  useSettings.subscribe((st, prev) => {
+    if (st.eqEnabled !== prev.eqEnabled || st.eqGains !== prev.eqGains) applyEq();
+  });
 
   setupMediaSession();
   setupAudioOutputWatch();

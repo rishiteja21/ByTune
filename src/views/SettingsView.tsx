@@ -22,6 +22,7 @@ import {
   Music4,
   RefreshCw,
   SlidersHorizontal,
+  SlidersVertical,
   Speaker,
   Sparkles,
   Trash2,
@@ -39,7 +40,7 @@ import { useSession } from "../lib/session";
 import { setOnboardingIntent } from "../lib/onboardingIntent";
 import { GuestDeleteModal } from "../components/AccountModals";
 import { useUI, type MenuItem } from "../stores/ui";
-import { listOutputDevices } from "../lib/audio";
+import { EQ_BANDS, listOutputDevices } from "../lib/audio";
 import type { OutputDeviceChoice } from "../lib/audio-output";
 
 /* ============================================================ settings chrome
@@ -253,6 +254,74 @@ function SliderRow({
         }
       />
     </div>
+  );
+}
+
+const EQ_PRESETS: Record<string, number[]> = {
+  Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  Bass: [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
+  Treble: [0, 0, 0, 0, 0, 1, 2, 4, 5, 6],
+  Vocal: [-2, -2, -1, 0, 2, 4, 4, 2, 0, -1],
+  Loudness: [5, 4, 2, 0, -1, -1, 0, 2, 4, 5],
+};
+
+const bandLabel = (hz: number): string => (hz >= 1000 ? `${hz / 1000}k` : String(hz));
+
+/** 10-band graphic EQ: switch, presets, one vertical slider per band (±12 dB). */
+function EqualizerRows() {
+  const enabled = useSettings((st) => st.eqEnabled);
+  const gains = useSettings((st) => st.eqGains);
+  const { setEqEnabled, setEqGains } = useSettings.getState();
+  const preset = Object.keys(EQ_PRESETS).find((k) => EQ_PRESETS[k].every((g, i) => g === gains[i]));
+  return (
+    <>
+      <SettingsRow
+        icon={SlidersVertical}
+        title="Equalizer"
+        subtitle={enabled ? `10-band, ${preset ?? "Custom"}` : "Shape the sound with a 10-band EQ"}
+        trailing={<Switch checked={enabled} onChange={setEqEnabled} />}
+        onClick={() => setEqEnabled(!enabled)}
+      />
+      {enabled && (
+        <div className={`${TEXT_INSET} pr-4 pb-4`}>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {Object.keys(EQ_PRESETS).map((name) => (
+              <button
+                key={name}
+                onClick={() => setEqGains(EQ_PRESETS[name])}
+                className={`text-[12px] rounded-full px-3 py-1 transition-colors ${
+                  name === preset ? "bg-primary text-on-primary" : "bg-ink-hi/[0.08] text-ink-hi hover:bg-ink-hi/[0.14]"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-between gap-1 max-w-[520px]">
+            {EQ_BANDS.map((hz, i) => (
+              <label key={hz} className="flex flex-col items-center gap-1.5 min-w-0 flex-1">
+                <span className="text-[11px] tabular-nums text-ink-dim">
+                  {gains[i] > 0 ? `+${gains[i]}` : gains[i]}
+                </span>
+                <input
+                  type="range"
+                  min={-12}
+                  max={12}
+                  step={1}
+                  value={gains[i] ?? 0}
+                  aria-label={`${bandLabel(hz)} Hz`}
+                  onChange={(e) => setEqGains(gains.map((g, j) => (j === i ? Number(e.target.value) : g)))}
+                  onDoubleClick={() => setEqGains(gains.map((g, j) => (j === i ? 0 : g)))}
+                  className="h-[120px] w-5 accent-[rgb(var(--primary))] cursor-pointer"
+                  style={{ writingMode: "vertical-lr", direction: "rtl" }}
+                />
+                <span className="text-[11px] text-ink-dim">{bandLabel(hz)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -765,6 +834,8 @@ export function SettingsView() {
           current={s.playbackSpeed}
           onChange={s.setPlaybackSpeed}
         />
+        <Divider />
+        <EqualizerRows />
       </SettingsGroup>
 
       <SettingsGroup header="Appearance">
