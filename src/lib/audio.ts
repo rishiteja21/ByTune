@@ -222,7 +222,8 @@ async function fetchLoudness(proxyUrl: string, trackId: string): Promise<void> {
  */
 function prefetchLoudness(track: Track | null): void {
   if (!track || track.localPath || track.id.startsWith("local:")) return;
-  if (loudnessGains.has(track.id)) return;
+  // No loudnessGains shortcut: a replayed track knows its gain but its
+  // resolution has likely expired, and a warm `?meta=1` hit costs nothing.
   void (async () => {
     const url = await requireBridge().getStreamUrl(track.id, false, useSettings.getState().streamingQuality);
     if (url) await fetchLoudness(url, track.id);
@@ -1228,14 +1229,13 @@ async function loadTrack(track: Track | null, autoplay: boolean): Promise<void> 
     duration: track.duration || 0,
   });
   requestSilenceAnalysis(track);
-  // When a transition is armed, pre-warm the next track's loudness: its gain
-  // must be known the moment a crossfade starts, and the proxy-side stream
-  // resolution warms up with it.
-  if (fadeMsForNext() >= 500) {
-    const st = usePlayer.getState();
-    prefetchLoudness(st.queue[st.index + 1] ?? null);
-  }
   await loadUrl(track, autoplay, false);
+  // Pre-warm the next track: its proxy-side stream resolution (so a skip
+  // never waits on a getBasicInfo + probe roundtrip) and its loudness (a
+  // crossfade needs the gain the moment it starts). After loadUrl, so the
+  // current track's resolution goes first.
+  const st = usePlayer.getState();
+  if (st.queue[st.index]?.id === track.id) prefetchLoudness(st.queue[st.index + 1] ?? null);
 }
 
 async function loadUrl(track: Track, autoplay: boolean, forceRotate: boolean): Promise<void> {
