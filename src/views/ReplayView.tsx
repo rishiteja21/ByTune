@@ -43,6 +43,7 @@ import { useJournal } from "../stores/journal";
 import { useLibrary } from "../stores/library";
 import { usePlayer } from "../stores/player";
 import { useUI } from "../stores/ui";
+import { visualActivity } from "../lib/visualActivity";
 import type { Track } from "../types";
 
 const PERIODS: { key: ReplayPeriod; label: string }[] = [
@@ -86,19 +87,17 @@ function useCountUp(value: number, ms = 1100): number {
       setShown(value);
       return;
     }
-    const start = performance.now();
     const base = from.current;
-    let raf = 0;
-    const tick = (t: number): void => {
-      const k = Math.min(1, (t - start) / ms);
+    let elapsed = 0;
+    const stopFrames = visualActivity.runFrames((_now, delta) => {
+      elapsed += delta;
+      const k = Math.min(1, elapsed / ms);
       const eased = 1 - Math.pow(1 - k, 4);
       setShown(Math.round(base + (value - base) * eased));
-      if (k < 1) raf = requestAnimationFrame(tick);
-      else from.current = value;
-    };
-    raf = requestAnimationFrame(tick);
+      if (k >= 1) { from.current = value; return false; }
+    });
     return () => {
-      cancelAnimationFrame(raf);
+      stopFrames();
       from.current = value;
     };
   }, [value, ms]);

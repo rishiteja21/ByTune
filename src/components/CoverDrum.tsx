@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { DRUM, PER_RING, RINGS, STEP, frontTile, type DrumCover } from "../lib/coverDrum";
+import { visualActivity } from "../lib/visualActivity";
 
 /** Each ring's own pace, degrees a second, alternating like the walls' rows (one per ring). */
 const PACE = [4.2, -3.1, 3.6, -2.7, 3.9];
@@ -185,12 +186,9 @@ export function CoverDrum({ turn, busy }: { turn: number; busy: boolean }) {
     window.addEventListener("blur", onUp);
     window.addEventListener("wheel", onWheel, { passive: true });
 
-    let last = performance.now();
     let lastFront = -1;
-    let id = 0;
-    const tick = (now: number): void => {
-      const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
-      last = now;
+    const stopFrames = visualActivity.runFrames((_now, elapsed) => {
+      const dt = Math.min(0.05, Math.max(0, elapsed / 1000));
       const ease = (rate: number): number => 1 - Math.exp(-dt * rate);
       const state = live.current;
       if (state.notch) {
@@ -219,11 +217,9 @@ export function CoverDrum({ turn, busy }: { turn: number; busy: boolean }) {
         lastFront = i;
         setFront(DRUM[MID][i]);
       }
-      id = window.requestAnimationFrame(tick);
-    };
-    id = window.requestAnimationFrame(tick);
+    });
     return () => {
-      window.cancelAnimationFrame(id);
+      stopFrames();
       drum.removeEventListener("pointerdown", onDown);
       drum.removeEventListener("pointerover", onOver);
       drum.removeEventListener("pointerleave", onLeave);

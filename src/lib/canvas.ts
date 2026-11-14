@@ -44,14 +44,14 @@ export function useCanvas(track: Track | null): CanvasClip | null {
  * the file streams in while it plays, and every loop goes back to its first
  * frame. Returns the cleanup.
  */
-export function playFragmented(video: HTMLVideoElement, url: string): () => void {
+export function playFragmented(video: HTMLVideoElement, url: string, canPlay: () => boolean = () => true): () => void {
   const source = new MediaSource();
   const abort = new AbortController();
   const src = URL.createObjectURL(source);
   const first = (): number => (video.buffered.length ? video.buffered.start(0) : 0);
   const restart = (): void => {
     video.currentTime = first();
-    void video.play().catch(() => undefined);
+    if (canPlay()) void video.play().catch(() => undefined);
   };
   video.addEventListener("ended", restart);
   source.addEventListener(

@@ -12,10 +12,9 @@ import { useUI } from "../stores/ui";
 /**
  * The flame, cartoon-style: flat chunky shapes — an orange flame with three
  * licks, a yellow heart, a pale core and a shine. It pops alight with a
- * springy squash-and-stretch and a little burst ring, then keeps dancing:
- * its outlines swap between hand-drawn frames like animation cels, it rocks
- * on its base, and star sparkles pop off the top. Unlit it's a flat grey
- * shape; Reduce animation leaves it lit and still.
+ * springy squash-and-stretch, a little burst ring and a few star sparkles,
+ * then rests as a static lit flame. Unlit it's a flat grey shape; Reduce
+ * animation leaves it lit and still.
  */
 export function FireMark({ lit }: { lit: boolean }) {
   return (

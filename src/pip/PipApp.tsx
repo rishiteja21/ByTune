@@ -615,7 +615,7 @@ export function PipApp() {
                   track ? "hover:underline" : ""
                 }`}
               >
-                <FitText mode="auto" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
+                <FitText mode="auto" activityPolicy="visible" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
               </button>
               <button
                 key={trackId ? `${trackId}-a` : "a"}
@@ -626,7 +626,7 @@ export function PipApp() {
                   track ? "hover:text-white hover:underline" : ""
                 }`}
               >
-                <FitText mode="auto" text={track ? track.artist : ""} />
+                <FitText mode="auto" activityPolicy="visible" text={track ? track.artist : ""} />
               </button>
             </div>
 
@@ -966,7 +966,7 @@ export function PipApp() {
                   track ? "hover:underline" : ""
                 }`}
               >
-                <FitText mode="auto" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
+                <FitText mode="auto" activityPolicy="visible" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
               </button>
               <button
                 key={trackId ? `${trackId}-a` : "a"}
@@ -977,7 +977,7 @@ export function PipApp() {
                   track ? "hover:text-white hover:underline" : ""
                 }`}
               >
-                <FitText mode="auto" text={track ? track.artist : ""} />
+                <FitText mode="auto" activityPolicy="visible" text={track ? track.artist : ""} />
               </button>
             </div>
 

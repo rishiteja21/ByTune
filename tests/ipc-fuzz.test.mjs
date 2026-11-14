@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { transform } from "esbuild";
 import { srcModule } from "./helpers/src-module.mjs";
+import { getWindowActivity } from "../.test-build/window-activity-native.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -84,6 +85,7 @@ async function loadIpcHandlers() {
         readLocalArtThumb: () => null, readArtFile: () => null, resetLocalLibrary: async () => {},
       };
       if (name === "./canvas") return { canvasFor: async () => null };
+      if (name === "./window-activity") return { getWindowActivity };
       if (name === "./stats") return {
         initStats() {}, flushSync() {}, resetStats() {},
         noteTrackStart() {}, recordListening() {}, summary: () => ({}),
