@@ -18,6 +18,9 @@ for (const name of readdirSync(root)) {
 const dir = join(root, `run-${process.pid}`)
 mkdirSync(dir, { recursive: true })
 const [cmd, ...args] = process.argv.slice(2)
-const r = spawnSync(cmd, args, { stdio: 'inherit', shell: true, env: { ...process.env, TEMP: dir, TMP: dir, TMPDIR: dir } })
+// Tests bundle the sign-in code themselves and stub the network: a stand-in Supabase project,
+// never the real one (scripts/build-main.mjs bakes that into app builds only).
+const cloud = { BYTUNE_SUPABASE_URL: 'https://bytune-test.invalid', BYTUNE_SUPABASE_KEY: 'sb_publishable_test' }
+const r = spawnSync(cmd, args, { stdio: 'inherit', shell: true, env: { ...process.env, ...cloud, TEMP: dir, TMP: dir, TMPDIR: dir } })
 rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
 process.exit(r.status ?? 1)

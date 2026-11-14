@@ -79,7 +79,8 @@ function fixture() {
     const { code } = transformSync(source, { loader: "ts", format: "cjs" });
     vm.runInNewContext(code, {
       module, exports: module.exports, console, Buffer, URL, setTimeout, clearTimeout,
-      process: { env: {}, on() {} },
+      // A stand-in Supabase project (config.ts reads it from the build): the SDK is stubbed above.
+      process: { env: { BYTUNE_SUPABASE_URL: "https://bytune-test.invalid", BYTUNE_SUPABASE_KEY: "sb_publishable_test" }, on() {} },
       require(name) {
         if (name === "electron") return electron;
         if (name === "fs") return fakeFs;

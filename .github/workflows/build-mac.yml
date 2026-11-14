@@ -49,6 +49,12 @@ jobs:
 
       - name: Build renderer + electron main
         run: npm run build
+        env:
+          # ByTune's Supabase project, kept out of the source (scripts/build-main.mjs).
+          # BYTUNE_RELEASE makes the build fail rather than ship without accounts.
+          BYTUNE_SUPABASE_URL: ${{ secrets.BYTUNE_SUPABASE_URL }}
+          BYTUNE_SUPABASE_KEY: ${{ secrets.BYTUNE_SUPABASE_KEY }}
+          BYTUNE_RELEASE: "1"
 
       - name: Package ZIP installers (guaranteed)
         # ZIP targets have proven reliable on CI; DMGs are attempted

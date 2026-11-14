@@ -101,8 +101,12 @@ export function getClient(): SupabaseClient | null {
   return client;
 }
 
+/** False in a build without ByTune's Supabase project (config.ts): it runs guest-only. */
+const cloudConfigured = (): boolean => !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
+
 function supabase(): SupabaseClient {
   if (client) return client;
+  if (!cloudConfigured()) throw new Error("Accounts aren't available in this build of ByTune.");
   client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
       flowType: "pkce",
@@ -120,6 +124,7 @@ function supabase(): SupabaseClient {
 
 /** Restore a sealed session (if any) at boot. */
 export async function initAuth(): Promise<void> {
+  if (!cloudConfigured()) return;
   const sealed = (persist.readData("auth") as { sealed?: string } | null)?.sealed;
   if (!sealed) return;
   const raw = openSecret(sealed);

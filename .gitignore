@@ -6,6 +6,8 @@ release/
 .DS_Store
 .bytune-install
 .test-build
+# ByTune's Supabase project for builds (see .env.example) — never commit
+.env
 
 # User data (profiles, auth) — never commit
 data/

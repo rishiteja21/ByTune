@@ -20,6 +20,8 @@ npm run dev
 
 `npm run dev` starts Vite (renderer) and Electron together with hot reload. The app opens with its onboarding screen — **Continue as guest** is fine for development; your data is stored locally.
 
+Accounts, sync and Rooms need a Supabase project, which the source doesn't include. To work on them, copy `.env.example` to `.env` and fill in your own project's URL and publishable key. Without it, ByTune runs guest-only.
+
 ## Useful commands
 
 | Command | What it does |
@@ -41,6 +43,7 @@ The Windows and macOS editions share one codebase: platform-specific behavior li
 The installed app checks GitHub's latest release for a newer version (`electron/updater.ts`). Windows installs it in the app; a Mac sends people to bytune.space, because macOS only installs updates to apps signed with an Apple Developer ID.
 
 1. Set `version` in `package.json`. The app, its About page and the update check all read it from there.
+   Official builds need ByTune's Supabase project in `.env` (`BYTUNE_SUPABASE_URL`, `BYTUNE_SUPABASE_KEY`); the macOS workflow reads the same two from the repository's secrets. `npm run dist*` stops if they're missing, so no release ships without accounts.
 2. `npm run dist:win` writes three files to `release/`: `ByTune-Setup.exe`, `latest.yml` and `ByTune-Setup.exe.blockmap`.
 3. Create the GitHub release with the tag `v<version>` and upload all three. Without `latest.yml`, Windows users are still told about the update, but have to download it themselves.
 4. Pushing the tag starts the macOS workflow, which attaches the Mac ZIPs and DMGs to that release.
