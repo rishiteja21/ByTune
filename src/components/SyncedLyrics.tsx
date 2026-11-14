@@ -18,10 +18,12 @@ import { romanize } from "../lib/romanize";
 import { LYRICS_LOADING_LINES, pickLyricsLine } from "../lib/lyricsPhrases";
 import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
+import { useVisualActivity, useVisualSnapshot, visualActivity } from "../lib/visualActivity";
 import type { LyricsResult, SyncedLyricWord } from "../types";
 
 /** How long the lyrics take to glide to the next line. */
 const GLIDE_MS = 600;
+const readPosition = (): number => usePlayer.getState().position;
 
 interface LyricsViewProps {
   lyrics: LyricsResult | null;
@@ -115,13 +117,9 @@ function WordLine({
     // The sweep only moves while audio is playing; parked at pause, the line
     // holds its last state instead of burning frames re-rendering.
     if (!playing) return;
-    let raf = 0;
-    const tick = (): void => {
+    return visualActivity.runFrames(() => {
       force((n) => (n + 1) % 1000000);
-      raf = window.requestAnimationFrame(tick);
-    };
-    raf = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(raf);
+    });
   }, [playing]);
   const pos = getPlaybackPosition() - offset;
   return (
@@ -191,7 +189,8 @@ export function LyricsView({
   trackKey,
 }: LyricsViewProps & { offset?: number }) {
   const variant: LyricsVariant = hero ? "hero" : large ? "large" : "compact";
-  const position = usePlayer((s) => s.position);
+  const visualActive = useVisualActivity();
+  const position = useVisualSnapshot(usePlayer.subscribe, readPosition);
   const seek = usePlayer((s) => s.seek);
   // Appearance switches with defined mobile behavior: synced lyrics gates
   // the whole synced treatment, blur de-emphasis is separately toggled,
@@ -211,6 +210,7 @@ export function LyricsView({
   const lastIndex = useRef(-1);
   /** The active line changed and no frame has moved the list for it yet. */
   const lineMoved = useRef(false);
+  const resuming = useRef(false);
 
   // BitChord mobile's LyricsLoadingLine: the lookup's stand-in is one of the
   // loading phrases — no spinner — picked once per track and held there.
@@ -261,6 +261,12 @@ export function LyricsView({
   // re-measured every frame), the line follows at once instead of easing in
   // behind the cover; a glide already under way just takes the new target.
   useEffect(() => {
+    if (!visualActive) {
+      window.cancelAnimationFrame(glide.current);
+      glideTo.current = null;
+      resuming.current = true;
+      return;
+    }
     if (activeIndex < 0) return;
     if (activeIndex !== lastIndex.current) {
       lastIndex.current = activeIndex;
@@ -277,7 +283,9 @@ export function LyricsView({
       const r = el.getBoundingClientRect();
       const mid = container.scrollTop + r.top - container.getBoundingClientRect().top + r.height / 2;
       const target = Math.max(0, mid - container.clientHeight * anchor);
-      if (!lineMoved.current) {
+      const resumed = resuming.current;
+      resuming.current = false;
+      if (!lineMoved.current && !resumed) {
         if (glideTo.current != null) glideTo.current = target;
         else container.scrollTop = target;
         return;
@@ -287,6 +295,7 @@ export function LyricsView({
       window.cancelAnimationFrame(glide.current);
       glideTo.current = null;
       const still =
+        resumed ||
         document.documentElement.classList.contains("reduce-motion") ||
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (still || Math.abs(target - from) > container.clientHeight * 1.5) {
@@ -305,7 +314,7 @@ export function LyricsView({
       glide.current = window.requestAnimationFrame(step);
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [activeIndex, synced, anchor]);
+  }, [activeIndex, synced, anchor, visualActive]);
   const stopGlide = (): void => {
     window.cancelAnimationFrame(glide.current);
     glideTo.current = null;

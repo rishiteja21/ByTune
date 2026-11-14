@@ -350,10 +350,10 @@ export function PlayerBar() {
           <div className="ml-2.5 min-w-0">
             <button onClick={toggleNowPlaying} className="block w-full text-left animate-meta-in" key={track ? `meta-${track.id}` : "meta-none"}>
               <span className="block min-w-0 px-1.5 -mx-1.5 text-[14px] leading-[19px] text-white hover:underline">
-                <FitText mode="auto" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
+                <FitText mode="auto" autoActive={playing} text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
               </span>
               <span className="block min-w-0 px-1.5 -mx-1.5 text-[12px] leading-[17px] text-[#b3b3b3] hover:underline">
-                <FitText mode="auto" text={track ? track.artist : "Search for something to play"} />
+                <FitText mode="auto" autoActive={playing} text={track ? track.artist : "Search for something to play"} />
               </span>
             </button>
           </div>

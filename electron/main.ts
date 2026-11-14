@@ -29,6 +29,7 @@ import * as transition from "./data-transition";
 import { buildAppMenu, type MenuCommand, type MenuPlaybackState, type MenuWiring } from "./mac-menu";
 import { buildTrayMenu, closeAction } from "./close-to-tray";
 import { placeOnScreen, readWindowState } from "./window-state";
+import { getWindowActivity, hideWindow, trackWindowActivity } from "./window-activity";
 import type { Track } from "../src/types";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -350,6 +351,9 @@ function createWindow(): void {
     },
   });
 
+  const activityWindow = mainWindow;
+  trackWindowActivity(activityWindow, (event) => pip.isTrustedSender(event, activityWindow));
+
   mainWindow.once("ready-to-show", () => {
     // The first launch opens maximized on Windows and at a normal size on
     // macOS (Spotify's convention); after that, the way it was closed.
@@ -494,7 +498,7 @@ function createWindow(): void {
     }
     // The same pause as the player's own button (an absolute pause: never starts anything).
     if (action === "tray") menuWiring().sendCommand("pause");
-    win.hide();
+    hideWindow(win);
   });
 
   // Windows sign-out, restart or shutdown: before-quit never comes, so save
@@ -559,6 +563,8 @@ function assertRendererStore(name: unknown): asserts name is string {
 }
 
 function registerIpc(): void {
+  // This read-only channel is scoped to either registered window's own main frame.
+  ipcMain.handle("window:activity:get", getWindowActivity);
   // Every main-window channel goes through this boundary, including fire-and-forget events.
   const ipc = {
     handle(channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void {

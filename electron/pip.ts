@@ -20,6 +20,7 @@ import { BrowserWindow, ipcMain, screen, type IpcMainEvent, type IpcMainInvokeEv
 import { pathToFileURL } from "url";
 import * as path from "path";
 import * as persist from "./persist";
+import { trackWindowActivity } from "./window-activity";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
@@ -304,6 +305,8 @@ export function openPip(): void {
       backgroundThrottling: false,
     },
   });
+  const activityWindow = pipWindow;
+  trackWindowActivity(activityWindow, (event) => isTrustedSender(event, activityWindow, true));
   // "floating" = standard always-on-top: above normal windows, below system
   // dialogs and other topmost windows (Spotify's level).
   pipWindow.setAlwaysOnTop(true, "floating");

@@ -43,6 +43,8 @@ import { FitText } from "./FitText";
 import { playFragmented, useCanvas } from "../lib/canvas";
 import { useLyricsOffset } from "../lib/lyricsOffset";
 import { useIdle } from "../lib/useIdle";
+import { visualActivity } from "../lib/visualActivity";
+import { homeVisualActivity } from "../lib/visualScope";
 import type { LyricsResult } from "../types";
 
 /** How long the pointer rests before the controls and the cursor go (YouTube's wait). */
@@ -62,11 +64,13 @@ function FsBackdropLayer({
   boost,
   legacy,
   enter,
+  playing,
 }: {
   artwork: string | null;
   boost: boolean;
   legacy: boolean;
   enter: boolean;
+  playing: boolean;
 }) {
   const palette = useArtworkPalette(artwork);
   return (
@@ -86,6 +90,9 @@ function FsBackdropLayer({
       <div
         className="absolute -inset-[20%] animate-drift"
         style={{
+          // CSS owns the timeline: pause preserves its phase, and Priority 2's
+          // inactive !important rule still wins when playback resumes offscreen.
+          animationPlayState: playing ? "running" : "paused",
           background: `radial-gradient(42% 44% at 22% 22%, rgb(${palette.accent} / ${boost ? 0.24 : 0.15}), transparent 66%),
                        radial-gradient(38% 40% at 80% 74%, rgb(${palette.wash} / ${boost ? 0.28 : 0.18}), transparent 64%)`,
         }}
@@ -106,10 +113,12 @@ function FsBackdrop({
   artwork,
   boost,
   legacy,
+  playing,
 }: {
   artwork: string | null;
   boost: boolean;
   legacy: boolean;
+  playing: boolean;
 }) {
   const id = artwork ?? "none";
   const [layers, setLayers] = useState<string[]>([id]);
@@ -131,6 +140,7 @@ function FsBackdrop({
           boost={boost}
           legacy={legacy}
           enter={i === layers.length - 1}
+          playing={playing}
         />
       ))}
     </div>
@@ -287,6 +297,12 @@ export function NowPlaying() {
    * - reduced motion → no exit delay at all, mount/unmount instantly.
    */
   const [mounted, setMounted] = useState(open);
+  // Coverage lasts through the existing exit animation. No duplicate timer or
+  // close-intent snapshot can restore Home while the overlay is still mounted.
+  useLayoutEffect(() => {
+    homeVisualActivity.setActive(!mounted);
+    return () => homeVisualActivity.setActive(true);
+  }, [mounted]);
   const [exiting, setExiting] = useState(false);
   const mountedRef = useRef(open);
   const exitTimer = useRef<number | null>(null);
@@ -364,14 +380,13 @@ export function NowPlaying() {
   useEffect(() => {
     const v = canvasVideoRef.current;
     if (!v || !canvasUrl || !canvasFragmented) return;
-    return playFragmented(v, canvasUrl);
-  }, [canvasUrl, canvasFragmented, animatedCanvas]);
+    return playFragmented(v, canvasUrl, () => visualActivity.getSnapshot() && usePlayer.getState().playing);
+  }, [canvasUrl, canvasFragmented, animatedCanvas, mounted]);
   useEffect(() => {
     const v = canvasVideoRef.current;
     if (!v) return;
-    if (playing) void v.play().catch(() => undefined);
-    else v.pause();
-  }, [playing, canvasUrl]);
+    return visualActivity.registerVideo(v, () => playing);
+  }, [playing, canvasUrl, canvasFragmented, animatedCanvas, mounted]);
 
   const palette: ArtworkPalette = useArtworkPalette(shown?.thumb ?? null);
 
@@ -446,7 +461,7 @@ export function NowPlaying() {
         exiting ? "fs-exiting" : ""
       } ${idle ? "fs-idle" : ""} ${moving ? "fs-moving" : ""}`}
     >
-      <FsBackdrop artwork={shown?.thumb ?? null} boost={boost} legacy={legacyMesh} />
+      <FsBackdrop artwork={shown?.thumb ?? null} boost={boost} legacy={legacyMesh} playing={playing} />
 
       <div className="relative h-full flex flex-col">
         {/* Fullscreen entry hint — Spotify's "To exit full screen, press Esc".
@@ -527,7 +542,6 @@ export function NowPlaying() {
                           key={canvasUrl}
                           ref={canvasVideoRef}
                           src={canvasFragmented ? undefined : canvasUrl}
-                          autoPlay
                           loop={!canvasFragmented}
                           muted
                           playsInline
@@ -555,10 +569,10 @@ export function NowPlaying() {
                 className="mt-7 flex flex-col items-center text-center max-w-full animate-meta-in"
               >
                 <div className="font-display text-[26px] xl:text-[30px] font-extrabold tracking-[-0.03em] text-white min-w-0 max-w-full">
-                  <FitText mode="auto" text={shortTitle(shown.title)} full={shown.title} />
+                  <FitText mode="auto" autoActive={playing} text={shortTitle(shown.title)} full={shown.title} />
                 </div>
                 <div className="text-[14px] xl:text-[15px] text-white/55 mt-1.5 min-w-0 max-w-full">
-                  <FitText mode="auto" text={shown.artist} />
+                  <FitText mode="auto" autoActive={playing} text={shown.artist} />
                 </div>
                 {titleSource(shown.title) && <div className="text-[12.5px] text-white/40 mt-1">From {titleSource(shown.title)}</div>}
                 {/* Idle, the pill fades and its row closes up. */}

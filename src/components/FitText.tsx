@@ -10,7 +10,10 @@
  * whenever any of the text is hidden — or the title was shortened (`full`) —
  * the whole of it is the hover tooltip.
  */
-import { useLayoutEffect, useRef } from "react";
+import { useContext, useLayoutEffect, useRef } from "react";
+import { visualActivity } from "../lib/visualActivity";
+import { createVisualActivity } from "../lib/visualActivityCore";
+import { VisualScopeContext } from "../lib/visualScope";
 
 /** Reading pace for a slide, in px per second. */
 const SPEED = 40;
@@ -65,6 +68,7 @@ export function FitText({
   className = "",
   lines = 1,
   mode = "hover",
+  autoActive = true,
 }: {
   text: string;
   /** The title before shortening; when it differs, it's the hover tooltip. */
@@ -72,17 +76,47 @@ export function FitText({
   className?: string;
   lines?: 1 | 2;
   mode?: "hover" | "auto";
+  /** Playback eligibility for automatic motion; deliberate reading still works. */
+  autoActive?: boolean;
 }) {
   const outer = useRef<HTMLSpanElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
+  const scope = useContext(VisualScopeContext);
+  const playback = useRef(autoActive);
+  const refreshActivity = useRef(() => {});
+  useLayoutEffect(() => {
+    playback.current = autoActive;
+    refreshActivity.current();
+  }, [autoActive]);
 
   useLayoutEffect(() => {
     const el = outer.current;
     const body = inner.current;
     if (!el || !body) return;
+    // One owner combines all vetoes. Playback/focus/coverage changes update
+    // this owner without recreating animations or scheduling a React render.
+    const activity = createVisualActivity();
+    const host = el.parentElement?.closest<HTMLElement>("button, a[href], [tabindex], .fit-host");
+    const update = (): void => {
+      const reading = el.matches(":hover, :focus-visible") || !!host?.matches(":hover, :focus-visible");
+      activity.setActive(visualActivity.getSnapshot() && (scope?.getSnapshot() ?? true) &&
+        (playback.current || reading));
+    };
+    const offActivity = mode === "auto" ? [
+      visualActivity.subscribe(update),
+      scope?.subscribe(update),
+    ] : [];
+    refreshActivity.current = update;
+    const interactionTargets = mode === "auto" ? [el, ...(host ? [host] : [])] : [];
+    const events = ["mouseenter", "mouseleave", "focusin", "focusout"];
+    for (const target of interactionTargets) for (const event of events) target.addEventListener(event, update);
+    update();
     let running: Animation[] = [];
+    let unregister: Array<() => void> = [];
     let slidingBy = 0;
     const stop = (): void => {
+      for (const off of unregister) off();
+      unregister = [];
       for (const a of running) a.cancel();
       running = [];
       slidingBy = 0;
@@ -95,6 +129,15 @@ export function FitText({
         const tip = hidden ? (full ?? text) : full && full !== text ? full : "";
         if (tip) el.setAttribute("title", tip);
         else el.removeAttribute("title");
+        if (mode === "auto") {
+          // Overflowing automatic titles also offer deliberate keyboard reading
+          // while paused, including the original title when it was shortened.
+          if (tip) {
+            if (!host?.matches("button, a[href], [tabindex]")) el.tabIndex = 0;
+            el.setAttribute("aria-label", tip);
+          }
+          else { el.removeAttribute("tabindex"); el.removeAttribute("aria-label"); }
+        }
         if (lines !== 1) return;
         const shift = hidden ? Math.round(over + FADE) : 0;
         el.style.setProperty("--fit-shift", `${-shift}px`);
@@ -132,6 +175,7 @@ export function FitText({
             { duration: total * 1000, iterations: Infinity }
           ),
         ];
+        unregister = running.map(activity.registerAnimation);
       };
     };
     const unwatch = watch(lines === 1 ? [el, body] : [el], measure);
@@ -140,8 +184,13 @@ export function FitText({
       unwatch();
       pending.delete(measure);
       stop();
+      el.removeAttribute("tabindex");
+      el.removeAttribute("aria-label");
+      refreshActivity.current = () => {};
+      for (const off of offActivity) off?.();
+      for (const target of interactionTargets) for (const event of events) target.removeEventListener(event, update);
     };
-  }, [text, full, lines, mode]);
+  }, [text, full, lines, mode, scope]);
 
   if (lines === 2) {
     return (

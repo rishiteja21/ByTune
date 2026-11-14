@@ -4,9 +4,12 @@ import App from "./App";
 import { PipApp } from "./pip/PipApp";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { endIntro } from "./intro";
+import { initializeVisualActivity } from "./lib/visualActivity";
 import "./lib/platform";
 import "./index.css";
 
+const disposeVisualActivity = initializeVisualActivity();
+import.meta.hot?.dispose(disposeVisualActivity);
 endIntro();
 
 /**

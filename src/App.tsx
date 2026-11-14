@@ -31,6 +31,7 @@ import { createSwipeNav, scrollsSideways, SWIPE_LIFT_MS, type SwipeDir, type Swi
 import { SwipeArrow, swipeArrow } from "./components/SwipeArrow";
 import { takeOnboardingIntent } from "./lib/onboardingIntent";
 import { startPipSync } from "./pip/pipSync";
+import { homeVisualActivity, VisualScope } from "./lib/visualScope";
 import { usePlayer } from "./stores/player";
 import { useLibrary } from "./stores/library";
 import { useSettings } from "./stores/settings";
@@ -443,6 +444,7 @@ export default function App() {
       }}
       className="h-screen flex flex-col ambient-root text-ink overflow-hidden select-none origin-center"
     >
+      <VisualScope activity={homeVisualActivity}>
       <TopBar />
       {/* Three-pane shell: sidebar · content · right rail, over a black canvas.
           8px gaps and side padding; 4px strip above the play bar (Spotify). */}
@@ -498,6 +500,7 @@ export default function App() {
         <RightRail />
       </div>
       <PlayerBar />
+      </VisualScope>
       <NowPlaying />
       <Dialog />
       <PlaylistPicker />

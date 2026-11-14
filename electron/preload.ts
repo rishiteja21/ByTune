@@ -7,6 +7,7 @@ import type {
 import type { LocalTrack } from "./local-library";
 import type { UpdateState } from "./updater";
 import { version as appVersion } from "../package.json";
+import type { WindowActivity } from "../src/lib/windowActivity";
 
 // The PiP window loads this same preload but its scope requests are rejected
 // by design (main-window-only handler) — an eager invoke there would leave an
@@ -90,6 +91,12 @@ const api = {
   },
 
   // Window controls (frameless window — chrome drawn by the renderer)
+  getWindowActivity: (): Promise<WindowActivity> => ipcRenderer.invoke("window:activity:get"),
+  onWindowActivity: (cb: (state: WindowActivity) => void): (() => void) => {
+    const listener = (_e: unknown, state: WindowActivity): void => cb(state);
+    ipcRenderer.on("window:activity", listener);
+    return () => ipcRenderer.removeListener("window:activity", listener);
+  },
   windowMinimize: () => ipcRenderer.send("window:minimize"),
   windowMaximizeToggle: () => ipcRenderer.send("window:maximizeToggle"),
   windowClose: () => ipcRenderer.send("window:close"),
