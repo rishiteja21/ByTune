@@ -94,6 +94,8 @@ Search songs, videos, albums, artists and playlists from YouTube Music, with liv
 
 A proper queue: see what's playing and what's next, reorder by drag, add with "Play next" or "Add to queue" from any track's right-click menu, and keep the music going with endless AutoPlay when the queue ends. Shuffle, repeat (off / all / one) and crossfade are one click away.
 
+Drag the dividers beside Library and Now Playing to resize the side panels within their limits. Widths are remembered on this computer and adapt to smaller windows. Double-click a divider to reset one panel, or use **Settings → Display → Reset widths** for both. With a divider focused, Left/Right arrows resize it (Shift for larger steps), Home/End reach its limits, and Enter resets it.
+
 ### Your library
 
 ![ByTune Liked Songs page under a wall of its covers, with play and shuffle](docs/screenshots/library.jpg)

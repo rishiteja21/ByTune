@@ -86,11 +86,11 @@ test("reserved/noncanonical persistence names are rejected before storage on bot
     for (const channel of ["data:read", "data:write"]) await assert.rejects(h.invoke(channel, name), /Store not allowed/);
   }
   assert.equal(h.calls.length, 0);
-  for (const name of ["settings", "library", "player", "recent-searches", "listening-signals", "artist-meta-cache"]) {
+  for (const name of ["settings", "panel-layout", "library", "player", "recent-searches", "listening-signals", "artist-meta-cache"]) {
     await h.invoke("data:read", name);
     await h.invoke("data:write", name);
   }
-  assert.equal(h.calls.length, 12);
+  assert.equal(h.calls.length, 14);
   await assert.rejects(h.invoke("data:read", "settings", false), /Untrusted IPC sender/);
 });
 

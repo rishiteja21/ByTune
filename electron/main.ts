@@ -540,6 +540,7 @@ function stripMediaReferer(): void {
 // Exact names used by renderer persistence; internal stores are main-only.
 const RENDERER_STORES = new Set([
   "settings",
+  "panel-layout",
   "library",
   "player",
   "recent-searches",

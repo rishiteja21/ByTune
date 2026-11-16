@@ -23,6 +23,7 @@ import {
   ChevronsUpDown,
   CirclePlay,
   Clapperboard,
+  Columns3,
   CloudDownload,
   CloudUpload,
   Database,
@@ -65,6 +66,7 @@ import {
   X,
 } from "lucide-react";
 import { DOWNLOAD_QUALITY_LABEL, LOUDNESS_LABEL, STREAM_QUALITY_LABEL, useSettings } from "../stores/settings";
+import { usePanelLayout } from "../stores/panelLayout";
 import { isWindows } from "../lib/platform";
 import { useLibrary } from "../stores/library";
 import { shownName, useSession } from "../lib/session";
@@ -96,7 +98,7 @@ const CATEGORIES = [
   { id: "playback", label: "Playback", icon: CirclePlay, lede: "How songs start, end and follow each other" },
   { id: "sound", label: "Sound", icon: AudioLines, lede: "Quality, loudness, where it plays and how it's shaped" },
   { id: "lyrics", label: "Lyrics", icon: MicVocal, lede: "How lyrics follow the song" },
-  { id: "display", label: "Display", icon: Palette, lede: "Motion, glass and how covers show" },
+  { id: "display", label: "Display", icon: Palette, lede: "Layout, motion, glass and how covers show" },
   { id: "library", label: "Library", icon: Library, lede: "Your music folders and downloads" },
   { id: "data", label: "Your data", icon: Database, lede: "Your listening, your backups and a fresh start" },
   { id: "about", label: "About", icon: Info, lede: "The version you're running and where ByTune lives" },
@@ -1161,8 +1163,25 @@ function LyricsPane() {
 
 function DisplayPane() {
   const s = useSettings();
+  const resetWidths = usePanelLayout((st) => st.resetWidths);
+  const [hydrated, setHydrated] = useState(usePanelLayout.persist.hasHydrated());
+
+  useEffect(() => {
+    const off = usePanelLayout.persist.onFinishHydration(() => setHydrated(true));
+    setHydrated(usePanelLayout.persist.hasHydrated());
+    return off;
+  }, []);
+
   return (
     <>
+      <Group title="Layout">
+        <Row
+          icon={Columns3}
+          title="Panel widths"
+          note="Drag the dividers beside Library and Now Playing to resize. Widths are remembered on this device; double-click a divider to reset that panel."
+          control={<Button disabled={!hydrated} onClick={() => { resetWidths(); useUI.getState().toast("Panel widths reset"); }}>Reset widths</Button>}
+        />
+      </Group>
       <Group title="Motion and glass">
         <Row
           icon={AppWindow}

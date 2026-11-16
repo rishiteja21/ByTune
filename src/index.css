@@ -66,6 +66,37 @@ body,
   -webkit-app-region: no-drag;
 }
 
+/* Draggable gaps in the three-pane shell. The hit area fills the gap; the
+   hairline only lights up on hover, keyboard focus or an active drag. */
+.panel-divider {
+  position: relative;
+  min-width: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-divider::before {
+  content: "";
+  position: absolute;
+  inset: 16px 3px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.panel-divider:is(:hover, [data-dragging])::before {
+  background: rgb(var(--ink-hi) / 0.35);
+}
+.panel-divider:focus-visible::before {
+  background: rgb(var(--ink-hi) / 0.8);
+}
+.panel-divider[aria-disabled="true"] {
+  pointer-events: none;
+}
+.panel-resizing,
+.panel-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 body {
   @apply bg-base text-ink antialiased font-sans;
   overflow: hidden;

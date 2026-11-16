@@ -128,6 +128,7 @@ test("reset drains old writes, blocks new writes and removes ownership archives 
     const archive = `owner-${"a".repeat(64)}-library`;
     await persist.writeData(archive, { secret: true });
     await persist.writeData("data-owner", { owner: "old" });
+    await persist.writeData("panel-layout", { state: { widths: { library: 400, nowPlaying: 360 } } });
     await persist.writeData("unrelated", { keep: true });
     fs.mkdirSync(path.join(dir, "local-art"));
     fs.writeFileSync(path.join(dir, "local-art", "cover.jpg"), "cover");
@@ -150,7 +151,7 @@ test("reset drains old writes, blocks new writes and removes ownership archives 
     assert.equal(finished, false, "reset must await the actual in-flight temp write");
     gate.resolve();
     await Promise.all([old, queued, reset, concurrentReset]);
-    for (const name of ["library", "data-owner", archive]) assert.equal(persist.readData(name), null);
+    for (const name of ["library", "panel-layout", "data-owner", archive]) assert.equal(persist.readData(name), null);
     assert.equal(persist.readData("unrelated").keep, true);
     assert.equal(fs.readFileSync(path.join(dir, "audio.mp3"), "utf8"), "audio");
     assert.equal(fs.existsSync(path.join(dir, "local-art")), false);

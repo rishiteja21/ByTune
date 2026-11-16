@@ -8,6 +8,7 @@ import { PlaylistPicker } from "./components/PlaylistPicker";
 import { Onboarding } from "./views/OnboardingView";
 import { PlayerBar } from "./components/PlayerBar";
 import { RightRail } from "./components/RightRail";
+import { ResizablePanels } from "./components/ResizablePanels";
 import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/Toasts";
 import { TopBar } from "./components/TopBar";
@@ -445,9 +446,8 @@ export default function App() {
     >
       <TopBar />
       {/* Three-pane shell: sidebar · content · right rail, over a black canvas.
-          8px gaps and side padding; 4px strip above the play bar (Spotify). */}
-      <div className="flex flex-1 min-h-0 gap-2 px-2 pb-1">
-        <Sidebar />
+          The 8px gaps are draggable; 4px strip above the play bar. */}
+      <ResizablePanels library={<Sidebar />} nowPlaying={<RightRail />}>
         <main
           className="flex-1 min-w-0 flex flex-col bg-surface rounded-2xl overflow-hidden relative"
           {...panelDrop.props}
@@ -495,8 +495,7 @@ export default function App() {
             </>
           )}
         </main>
-        <RightRail />
-      </div>
+      </ResizablePanels>
       <PlayerBar />
       <NowPlaying />
       <Dialog />

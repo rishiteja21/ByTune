@@ -28,6 +28,7 @@ const { outputFiles } = await build({
     contents: [
       `export { SettingsView } from "./src/views/SettingsView";`,
       `export { useSettings } from "./src/stores/settings";`,
+      `export { usePanelLayout } from "./src/stores/panelLayout";`,
       `export { useUI } from "./src/stores/ui";`,
       `export { useSession } from "./src/lib/session";`,
     ].join("\n"),
@@ -40,7 +41,7 @@ const { outputFiles } = await build({
 });
 const module = { exports: {} };
 new Function("require", "module", "exports", outputFiles[0].text)(require, module, module.exports);
-const { SettingsView, useSettings, useUI, useSession } = module.exports;
+const { SettingsView, useSettings, usePanelLayout, useUI, useSession } = module.exports;
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -50,17 +51,20 @@ globalThis.ResizeObserver = class {
 
 const ACCOUNT = { mode: "account", username: "rishi", displayName: "Rishi", loaded: true };
 
-async function mount(session = ACCOUNT, view = { name: "settings" }) {
+async function mount(session = ACCOUNT, view = { name: "settings" }, panelRead) {
   const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost", pretendToBeVisual: true });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   window.bytune = {
     ...globalThis.bytune,
+    readData: (name) => name === "panel-layout" && panelRead ? panelRead : globalThis.bytune.readData(name),
     syncStatus: async () => ({ lastSyncAt: Date.UTC(2026, 10, 4, 18, 7), state: "idle", lastError: null }),
     localLibrary: async () => ({ folders: [] }),
     versions: { app: "1.0.1", electron: "", chrome: "" },
   };
+  const hydration = usePanelLayout.persist.rehydrate();
+  if (!panelRead) await hydration;
   useSession.setState(session);
   useUI.setState({ view, navPast: [{ view: { name: "home" }, scroll: 0 }], navFuture: [], dialog: null, contextMenu: null });
   const root = createRoot(document.getElementById("root"));
@@ -77,6 +81,7 @@ async function mount(session = ACCOUNT, view = { name: "settings" }) {
   };
   const press = (el) => act(async () => el.click());
   return {
+    hydration,
     $,
     $$,
     shown,
@@ -169,6 +174,51 @@ test("a category swaps the page in place, with no history step, and the arrow ke
     await h.key(h.nav("Account"), "ArrowUp");
     assert.equal(useUI.getState().view.param, "about", "and round from the top to the bottom");
   } finally {
+    await h.close();
+  }
+});
+
+test("Display resets both panel widths, and searching finds the layout setting", async () => {
+  const h = await mount(ACCOUNT, { name: "settings", param: "display" });
+  try {
+    await act(async () => usePanelLayout.getState().setWidths({ library: 440, nowPlaying: 380 }));
+    const row = h.row("Panel widths");
+    assert.ok(row);
+    await h.press(row.querySelector("button"));
+    assert.deepEqual(usePanelLayout.getState().widths, { library: 328, nowPlaying: 328 });
+    await h.press(h.nav("Account"));
+    await h.search("panel widths");
+    assert.ok(h.shown(h.row("Panel widths")));
+  } finally {
+    environment.window.dispatchEvent(new environment.window.Event("pagehide"));
+    await h.close();
+  }
+});
+
+test("Display waits for saved panel widths before allowing a reset", async () => {
+  let finishRead;
+  const panelRead = new Promise((resolve) => { finishRead = resolve; });
+  const h = await mount(ACCOUNT, { name: "settings", param: "display" }, panelRead);
+  try {
+    const reset = h.row("Panel widths").querySelector("button");
+    assert.equal(usePanelLayout.persist.hasHydrated(), false);
+    assert.equal(reset.disabled, true);
+    const widths = usePanelLayout.getState().widths;
+    const toasts = useUI.getState().toasts;
+    await h.press(reset);
+    assert.equal(usePanelLayout.getState().widths, widths);
+    assert.equal(useUI.getState().toasts, toasts, "a blocked reset reports no success");
+    await act(async () => {
+      finishRead({ state: { widths: { library: 420, nowPlaying: 380 } }, version: 0 });
+      await h.hydration;
+    });
+    assert.deepEqual(usePanelLayout.getState().widths, { library: 420, nowPlaying: 380 });
+    assert.equal(reset.disabled, false);
+    await h.press(reset);
+    assert.deepEqual(usePanelLayout.getState().widths, { library: 328, nowPlaying: 328 });
+  } finally {
+    await act(async () => { finishRead(null); await h.hydration; });
+    environment.window.dispatchEvent(new environment.window.Event("pagehide"));
     await h.close();
   }
 });

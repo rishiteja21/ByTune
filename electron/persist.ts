@@ -164,6 +164,7 @@ export async function resetAppData(): Promise<void> {
         "player",
         "library",
         "settings",
+        "panel-layout",
         "recent-searches",
         "listening-signals",
         "listening-history",
