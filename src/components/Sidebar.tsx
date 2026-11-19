@@ -24,6 +24,7 @@ import { useUI } from "../stores/ui";
 import { EqBars } from "./primitives";
 import { FitText } from "./FitText";
 import { shortTitle } from "../lib/format";
+import { useSettings } from "../stores/settings";
 import { addSongsToPlaylists, staysOnDevice } from "../lib/devicePlaylists";
 import { upgradeArtwork } from "../lib/artwork";
 import { CreateMenu } from "./CreateMenu";
@@ -83,6 +84,12 @@ function LibraryPill() {
   const openDialog = useUI((s) => s.openDialog);
   const openContextMenu = useUI((s) => s.openContextMenu);
   const playingFrom = usePlayer(playingFromRow);
+
+  // Sidebar shortcut visibility, persisted in Settings → Library.
+  const showReplay = useSettings((s) => s.showReplay);
+  const showSpotify = useSettings((s) => s.showSpotify);
+  const showDownloads = useSettings((s) => s.showDownloads);
+  const showLocalMusic = useSettings((s) => s.showLocalMusic);
 
   const libraryOrder = useLibrary((s) => s.libraryOrder);
   /** the scrolling list, and the rows inside it that a drag reorders */
@@ -192,7 +199,14 @@ function LibraryPill() {
     pinned: singlePinned("replay"),
     singleKey: "replay",
   };
-  const singles: LibRow[] = [likedRow, spotifyRow, replayRow, downloadsRow, localRow];
+  // Settings → Library toggles each shortcut on/off. Liked Songs always shows.
+  const singles: LibRow[] = [
+    likedRow,
+    ...(showSpotify ? [spotifyRow] : []),
+    ...(showReplay ? [replayRow] : []),
+    ...(showDownloads ? [downloadsRow] : []),
+    ...(showLocalMusic ? [localRow] : []),
+  ];
 
   // A playlist of nothing but songs from this computer stays here, and says so where "Playlist" would be.
   const subtitleOf = (p: Playlist): string =>

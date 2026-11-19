@@ -4,8 +4,8 @@
  * by its own cover as the pointer passes. Songs dropped on the page are added (App's panel drop);
  * its own songs move within the list instead (useSortable).
  */
-import { useEffect, useRef } from "react";
-import { Download, FileDown, HardDrive, Heart, ListMusic, ListPlus, MoreHorizontal, Play, Shuffle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, FileDown, HardDrive, Heart, ListMusic, ListPlus, MoreHorizontal, Play, Shuffle, SlidersHorizontal, ArrowDown, ArrowUp } from "lucide-react";
 import { downloadAll } from "../lib/downloads";
 import { exportPlaylist } from "../lib/playlistShare";
 import { DownloadBadge } from "../components/TrackList";
@@ -44,7 +44,7 @@ export function PlaylistView({ playlistId }: { playlistId: string }) {
     listRef,
     scrollRef,
     clamp: (_from, target) => target,
-    canDrag: () => true,
+    canDrag: () => sortBy === "playlist",
     onCommit: (from, to) => {
       if (playlist) useLibrary.getState().moveInPlaylist(playlist.id, from, to);
     },
@@ -61,7 +61,23 @@ export function PlaylistView({ playlistId }: { playlistId: string }) {
     );
   }
 
-  const tracks = playlist.tracks;
+  const [sortBy, setSortBy] = useState<"playlist" | "title" | "artist" | "album" | "time">("playlist");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const tracks = useMemo(() => {
+    const list = [...playlist.tracks];
+    if (sortBy === "playlist") return sortDir === "desc" ? list.reverse() : list;
+    return list.sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case "title": cmp = (a.title ?? "").localeCompare(b.title ?? ""); break;
+        case "artist": cmp = (a.artist ?? "").localeCompare(b.artist ?? ""); break;
+        case "album": cmp = (a.album ?? "").localeCompare(b.album ?? ""); break;
+        case "time": cmp = a.duration - b.duration; break;
+      }
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+  }, [playlist.tracks, sortBy, sortDir]);
   // Keys stay with the song (id + which copy), so a moved row moves rather than remounting.
   const copies = new Map<string, number>();
   const rowKey = (id: string): string => {
@@ -102,6 +118,38 @@ export function PlaylistView({ playlistId }: { playlistId: string }) {
     ]);
   };
 
+  const sortLabels: Record<string, string> = {
+    playlist: "Playlist order",
+    title: "Title",
+    artist: "Artist",
+    album: "Album",
+    time: "Time",
+  };
+  const openSortMenu = (x: number, y: number): void => {
+    openContextMenu(x, y, [
+      {
+        label: "Sort by",
+        header: true,
+        separatorBefore: true,
+      },
+      ...["playlist", "title", "artist", "album", "time"].map((key) => ({
+        label: sortLabels[key],
+        checked: sortBy === key,
+        action: () => {
+          setSortBy(key as typeof sortBy);
+          // Keep the same direction unless switching back to playlist order keeps it.
+        },
+      })),
+      { separatorBefore: true },
+      {
+        label: "Reverse order",
+        icon: sortDir === "asc" ? ArrowDown : ArrowUp,
+        checked: sortDir === "desc",
+        action: () => setSortDir((d) => (d === "asc" ? "desc" : "asc")),
+      },
+    ]);
+  };
+
   return (
     <div className="pb-14">
       <CollectionHero
@@ -138,6 +186,15 @@ export function PlaylistView({ playlistId }: { playlistId: string }) {
         </button>
         <button type="button" className={HERO_ROUND} aria-label="Shuffle" title="Shuffle" onClick={() => play(true)}>
           <Shuffle className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          className={HERO_ROUND}
+          aria-label="Sort"
+          title="Sort"
+          onClick={(e) => openSortMenu(e.clientX, e.clientY)}
+        >
+          <SlidersHorizontal className="w-5 h-5" />
         </button>
         <button
           type="button"

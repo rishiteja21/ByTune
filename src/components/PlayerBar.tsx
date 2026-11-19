@@ -296,11 +296,13 @@ export function PlayerBar() {
   const lyricsCenter = useUI((s) => s.lyricsCenter);
   const rightPanel = useUI((s) => s.rightPanel);
   const nowPlayingOpen = useUI((s) => s.nowPlayingOpen);
+  const cinematicOpen = useUI((s) => s.cinematicOpen);
   const toggleLyrics = useUI((s) => s.toggleLyrics);
   const toggleQueue = useUI((s) => s.toggleQueue);
   const toggleRoom = useUI((s) => s.toggleRoom);
   const roomCode = useRoom((s) => s.view.state?.code ?? null);
   const toggleNowPlaying = useUI((s) => s.toggleNowPlaying);
+  const toggleCinematic = useUI((s) => s.toggleCinematic);
 
   // The miniplayer is a separate native always-on-top window (see
   // electron/pip.ts); this button just toggles it and mirrors its state.
@@ -428,7 +430,7 @@ export function PlayerBar() {
         {/* Right — lyrics, queue, volume, miniplayer, fullscreen. */}
         <div className="flex items-center justify-end">
           <SleepTimerButton />
-          <BarButton onClick={toggleLyrics} title="Lyrics" active={lyricsCenter}>
+          {!cinematicOpen && <><BarButton onClick={toggleLyrics} title="Lyrics" active={lyricsCenter}>
             <SpLyrics />
           </BarButton>
           <BarButton onClick={toggleQueue} title="Queue" active={rightPanel === "queue"}>
@@ -437,7 +439,7 @@ export function PlayerBar() {
           {/* In a room the button stays lit, as the sleep timer's moon does while it runs. */}
           <BarButton onClick={toggleRoom} title={roomCode ? `Room ${roomCode}` : "Room"} active={rightPanel === "room" || !!roomCode}>
             <Users size={16} strokeWidth={2} />
-          </BarButton>
+          </BarButton></>}
           {!hideVolumeBar && <VolumeControl VolIcon={VolIcon} />}
           <BarButton
             onClick={toggleMiniPlayer}
@@ -448,10 +450,10 @@ export function PlayerBar() {
             <SpMiniplayer />
           </BarButton>
           <BarButton
-            onClick={toggleNowPlaying}
-            title={nowPlayingOpen ? "Exit Full screen" : "Enter Full screen"}
+            onClick={toggleCinematic}
+            title={cinematicOpen ? "Exit Full screen" : "Enter Full screen"}
           >
-            {nowPlayingOpen ? <SpExitFullscreen /> : <SpFullscreen />}
+            {cinematicOpen ? <SpExitFullscreen /> : <SpFullscreen />}
           </BarButton>
         </div>
       </div>

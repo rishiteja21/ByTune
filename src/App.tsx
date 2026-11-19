@@ -3,7 +3,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { Dialog } from "./components/primitives";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { prefetchLyrics, LyricsCenter } from "./components/LyricsCenter";
-import { NowPlaying } from "./components/NowPlaying";
+import { NowPlaying, NowPlayingArtwork } from "./components/NowPlaying";
 import { PlaylistPicker } from "./components/PlaylistPicker";
 import { Onboarding } from "./views/OnboardingView";
 import { PlayerBar } from "./components/PlayerBar";
@@ -88,7 +88,7 @@ function useKeyboardShortcuts(): void {
         // this guard the same keystroke also closed the queue/lyrics panels
         // underneath it.
         if (ui.contextMenu) return;
-        if (ui.osFullscreen && !ui.nowPlayingOpen) {
+        if (ui.osFullscreen && !ui.cinematicOpen) {
           void window.bytune?.setFullScreen(false);
           return;
         }
@@ -97,7 +97,8 @@ function useKeyboardShortcuts(): void {
 
       const ui = useUI.getState();
       if (e.key === "Escape") {
-        if (ui.nowPlayingOpen) ui.toggleNowPlaying();
+        if (ui.cinematicOpen) ui.toggleCinematic();
+        else if (ui.nowPlayingOpen) ui.toggleNowPlaying();
         else if (ui.rightPanel === "queue" || ui.rightPanel === "room" || ui.lyricsCenter) ui.closePanels();
         return;
       }
@@ -156,13 +157,13 @@ function useKeyboardShortcuts(): void {
           ui.toggleLyrics();
           break;
         case "KeyN":
-          ui.toggleNowPlaying();
+          ui.toggleCinematic();
           break;
         case "BracketLeft":
         case "BracketRight": {
           // This song's lyrics timing, while lyrics are on screen.
           const id = player.queue[player.index]?.id;
-          if (!id || (!ui.lyricsCenter && !ui.nowPlayingOpen)) break;
+          if (!id || (!ui.lyricsCenter && !ui.cinematicOpen)) break;
           useLyricsNudge.getState().nudge(id, e.code === "BracketLeft" ? -LYRICS_NUDGE_STEP : LYRICS_NUDGE_STEP);
           break;
         }
@@ -193,7 +194,7 @@ function useKeyboardShortcuts(): void {
     let settle = 0;
     const blocked = (): boolean => {
       const ui = useUI.getState();
-      return !!(ui.dialog || ui.contextMenu || ui.playlistPicker || ui.nowPlayingOpen);
+      return !!(ui.dialog || ui.contextMenu || ui.playlistPicker || ui.cinematicOpen);
     };
     const apply = (u: SwipeUpdate | null): void => {
       if (!u) return;
@@ -313,6 +314,7 @@ export default function App() {
   const viewReloadNonce = useUI((s) => s.viewReloadNonce);
   const pendingScroll = useUI((s) => s.pendingScroll);
   const lyricsCenter = useUI((s) => s.lyricsCenter);
+  const nowPlayingOpen = useUI((s) => s.nowPlayingOpen);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const viewScrollRef = useRef<HTMLDivElement | null>(null);
   const session = useSession();
@@ -384,7 +386,7 @@ export default function App() {
     const off = window.bytune?.onFullScreenChange((fs) => {
       const ui = useUI.getState();
       ui.setOsFullscreen(fs);
-      if (!fs && ui.nowPlayingOpen) ui.toggleNowPlaying();
+      if (!fs && ui.cinematicOpen) ui.toggleCinematic();
     });
     return off;
   }, []);
@@ -424,6 +426,23 @@ export default function App() {
     return useSettings.persist.onFinishHydration(ready);
   }, [session.loaded]);
 
+  // Window hidden (macOS close-to-hide, Windows tray, another app in front):
+  // pause continuous decorative animations and lighten blur so the renderer
+  // stops drawing frames no one sees while music keeps playing. Restore on
+  // show so the user's own reduce-animation / reduce-blur settings take over.
+  useEffect(() => {
+    const root = document.documentElement;
+    const onHide = (): void => root.classList.add("in-background");
+    const onShow = (): void => root.classList.remove("in-background");
+    const onChange = (): void => (document.hidden ? onHide() : onShow());
+    document.addEventListener("visibilitychange", onChange);
+    if (document.hidden) onHide();
+    return () => {
+      document.removeEventListener("visibilitychange", onChange);
+      root.classList.remove("in-background");
+    };
+  }, []);
+
   useKeyboardShortcuts();
   useAmbient();
   useAppearance();
@@ -447,7 +466,7 @@ export default function App() {
       {/* Three-pane shell: sidebar · content · right rail, over a black canvas.
           8px gaps and side padding; 4px strip above the play bar (Spotify). */}
       <div className="flex flex-1 min-h-0 gap-2 px-2 pb-1">
-        <Sidebar />
+        {viewName !== "settings" && (nowPlayingOpen ? <NowPlayingArtwork /> : <Sidebar />)}
         <main
           className="flex-1 min-w-0 flex flex-col bg-surface rounded-2xl overflow-hidden relative"
           {...panelDrop.props}
@@ -495,7 +514,7 @@ export default function App() {
             </>
           )}
         </main>
-        <RightRail />
+        {viewName !== "settings" && <RightRail />}
       </div>
       <PlayerBar />
       <NowPlaying />

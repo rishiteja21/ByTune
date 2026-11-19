@@ -48,7 +48,7 @@
  * moves the window, it never plays or pauses.
  */
 import { useEffect, useRef, useState, type ReactNode, type FocusEvent } from "react";
-import { FoldVertical, Loader2, UnfoldVertical } from "lucide-react";
+import { FoldVertical, Heart, Loader2 } from "lucide-react";
 import {
   SpCheck,
   SpCoverNote,
@@ -87,7 +87,7 @@ const GRADIENT = "linear-gradient(rgba(18, 18, 18, 0.53) 0%, rgb(10, 10, 10) 100
 const BAR_SHADE = "linear-gradient(90deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 40%, rgba(0,0,0,0.82) 100%)";
 /** Shorter than this, the window is the compact bar: pip.ts makes it 320×110,
     and the square miniplayer can't be dragged below 233px. */
-const BAR_MAX_H = 175;
+const BAR_MAX_H = 230;
 
 /** like-burst confetti — flight target (--tx/--ty), spin (--rot), size and
     shade of each square in the Spotify-style "added" celebration */
@@ -477,7 +477,7 @@ export function PipApp() {
     }
     send({ type: "like" });
   };
-  const likeButton = (box: string, icon: string): ReactNode =>
+  const likeButton = (box: string, icon: string, variant: "plus" | "heart" = "plus"): ReactNode =>
     track && (
       <button
         type="button"
@@ -489,7 +489,9 @@ export function PipApp() {
         className={`relative grid ${box} shrink-0 cursor-pointer place-items-center rounded-full transition-transform duration-150 hover:scale-105 active:scale-90`}
       >
         <span key={snap?.liked ? "liked" : "unliked"} className="icon-swap">
-          {snap?.liked ? (
+          {variant === "heart" ? (
+            <Heart className={`${icon} ${snap?.liked ? "fill-[#1ed760] text-[#1ed760]" : "text-[#1ed760]"}`} strokeWidth={2.4} />
+          ) : snap?.liked ? (
             <SpCheck className={`${icon} text-[#1ed760]`} />
           ) : (
             <SpPlus className={`${icon} text-white/70 hover:text-white`} />
@@ -575,119 +577,67 @@ export function PipApp() {
     >
       {bar ? (
         <>
-          {/* ------------------------- the bar (short windows) ------------------------- */}
-          {/* Native drag surface: the whole bar, the cover included (a click on
-              it moves the window, as in the square layout). Controls carve no-drag. */}
+          {/* ---------------------- compact player card ---------------------- */}
+          {/* The card remains a native drag surface; controls make their own
+              no-drag islands so it can float over every macOS workspace. */}
           <div aria-hidden className="absolute inset-0" style={dragRegion} />
-          {/* The cover's glow: the cover itself blurred behind the bar, BAR_SHADE
-              darkening the text side. The dominant colour shows while it loads. */}
-          <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" style={{ backgroundColor: ambient }}>
+          <div aria-hidden className="pointer-events-none absolute inset-[1px] overflow-hidden rounded-[27px] bg-[#17171c]">
             {thumb && (
               <img
                 key={trackId ?? "none"}
                 src={thumb}
                 alt=""
                 draggable={false}
-                className="animate-art-in absolute inset-0 h-full w-full scale-125 object-cover opacity-80 blur-2xl saturate-150"
+                className="animate-art-in absolute inset-0 h-full w-full scale-125 object-cover opacity-[0.16] blur-3xl saturate-150"
               />
             )}
-            <div className="absolute inset-0" style={{ background: BAR_SHADE }} />
+            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.045),transparent_48%,rgba(0,0,0,0.26))]" />
           </div>
 
-          <div className="relative flex min-h-0 flex-1 items-center gap-2.5 px-2 pb-[3px]">
-            <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-[#181818] shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
-              {thumb ? (
-                <img key={trackId ?? "none"} src={thumb} alt="" draggable={false} className="animate-art-in h-full w-full object-cover" />
-              ) : (
-                <div key={trackId ?? "none"} className="animate-art-in grid h-full w-full place-items-center">
-                  <SpCoverNote className="h-1/2 w-1/2 text-white/25" />
-                </div>
-              )}
-            </div>
-
-            <div className="min-w-0 flex-1" style={noDragRegion}>
-              <button
-                key={trackId ?? "t"}
-                type="button"
-                onClick={() => openInMain("album")}
-                title={track ? "Go to album" : "Open ByTune"}
-                className={`animate-meta-in block w-full min-w-0 cursor-pointer text-left text-[13px] font-semibold leading-[1.35] text-white ${
-                  track ? "hover:underline" : ""
-                }`}
-              >
-                <FitText mode="auto" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
-              </button>
-              <button
-                key={trackId ? `${trackId}-a` : "a"}
-                type="button"
-                onClick={() => openInMain("artist")}
-                title={track ? "Go to artist" : "Open ByTune"}
-                className={`animate-meta-in block w-full min-w-0 cursor-pointer text-left text-[11px] leading-[1.4] text-white/60 ${
-                  track ? "hover:text-white hover:underline" : ""
-                }`}
-              >
-                <FitText mode="auto" text={track ? track.artist : ""} />
-              </button>
-            </div>
-
-            {likeButton("h-7 w-7", "h-4 w-4")}
-
-            <div className="flex shrink-0 items-center gap-0.5" style={noDragRegion}>
-              <IconBtn className="h-7 w-7" onClick={() => send({ type: "prev" })} title="Previous" disabled={!track}>
-                <SpPrev className="h-4 w-4" />
-              </IconBtn>
-              <button
-                type="button"
-                style={noDragRegion}
-                onClick={() => send({ type: "toggle" })}
-                disabled={!track}
-                title={playing ? "Pause" : "Play"}
-                aria-label={playing ? "Pause" : "Play"}
-                className="mx-0.5 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-white text-black shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-transform duration-150 hover:scale-[1.06] active:scale-95 focus-visible:scale-[1.06] disabled:pointer-events-none disabled:opacity-40"
-              >
-                {buffering ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <span key={playing ? "pause" : "play"} className="icon-swap">
-                    {playing ? <SpPause className="h-4 w-4" /> : <SpPlay className="ml-0.5 h-4 w-4" />}
-                  </span>
+          <div className="relative flex h-full flex-col rounded-[28px] border-[0.5px] border-white/[0.18] px-5 pb-4 pt-5 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),inset_0_0_0_1px_rgb(0_0_0_/_0.28),0_1px_0_rgb(255_255_255_/_0.05),0_18px_46px_rgba(0,0,0,0.42)]">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[#181818] shadow-[0_5px_16px_rgba(0,0,0,0.38)]">
+                {thumb ? <img key={trackId ?? "none"} src={thumb} alt="" draggable={false} className="animate-art-in h-full w-full object-cover" /> : (
+                  <div key={trackId ?? "none"} className="animate-art-in grid h-full w-full place-items-center"><SpCoverNote className="h-1/2 w-1/2 text-white/25" /></div>
                 )}
+              </div>
+              <div className="min-w-0 flex-1" style={noDragRegion}>
+                <button key={trackId ?? "t"} type="button" onClick={() => openInMain("album")} title={track ? "Go to album" : "Open ByTune"} className={`animate-meta-in block w-full min-w-0 cursor-pointer text-left text-[16px] font-semibold leading-[1.3] text-white ${track ? "hover:underline" : ""}`}>
+                  <FitText mode="auto" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} />
+                </button>
+                <button key={trackId ? `${trackId}-a` : "a"} type="button" onClick={() => openInMain("artist")} title={track ? "Go to artist" : "Open ByTune"} className={`animate-meta-in block w-full min-w-0 cursor-pointer text-left text-[13px] leading-[1.45] text-white/55 ${track ? "hover:text-white hover:underline" : ""}`}>
+                  <FitText mode="auto" text={track ? track.artist : ""} />
+                </button>
+              </div>
+              {likeButton("h-8 w-8", "h-5 w-5", "heart")}
+            </div>
+
+            <div className="mt-3" style={noDragRegion}>
+              <div aria-hidden onPointerDown={onStripPointerDown} title={duration > 0 ? `${fmtTime(shownSeek)} / ${fmtTime(duration)}` : undefined} className="group/seek relative h-1.5 cursor-pointer overflow-visible rounded-full bg-white/20">
+                <div className="relative h-full rounded-full bg-white transition-[width]" style={{ width: `${Math.min(100, Math.max(0, (shownSeek / max) * 100))}%` }}>
+                  <span className="absolute right-0 top-1/2 h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-white opacity-0 shadow transition-opacity group-hover/seek:opacity-100" />
+                </div>
+              </div>
+              <div className="mt-1.5 flex justify-between text-[11px] tabular-nums tracking-[0.08em] text-white/45"><span>{fmtTime(shownSeek)}</span><span>{fmtTime(duration)}</span></div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-3" style={noDragRegion}>
+              <IconBtn className="h-8 w-8" onClick={() => send({ type: "shuffle" })} active={snap?.shuffle} title="Shuffle" disabled={!track}><SpShuffle className="h-4 w-4" /></IconBtn>
+              <IconBtn className="h-9 w-9" onClick={() => send({ type: "prev" })} title="Previous" disabled={!track}><SpPrev className="h-5 w-5" /></IconBtn>
+              <button type="button" onClick={() => send({ type: "toggle" })} disabled={!track} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"} className="mx-1 grid h-14 w-14 shrink-0 cursor-pointer place-items-center rounded-full bg-white text-black shadow-[0_5px_22px_rgba(255,255,255,0.16)] transition-transform duration-150 hover:scale-[1.06] active:scale-95 focus-visible:scale-[1.06] disabled:pointer-events-none disabled:opacity-40">
+                {buffering ? <Loader2 className="h-5 w-5 animate-spin" /> : <span key={playing ? "pause" : "play"} className="icon-swap">{playing ? <SpPause className="h-5 w-5" /> : <SpPlay className="ml-0.5 h-5 w-5" />}</span>}
               </button>
-              <IconBtn className="h-7 w-7" onClick={() => send({ type: "next" })} title="Next" disabled={!track}>
-                <SpNext className="h-4 w-4" />
-              </IconBtn>
+              <IconBtn className="h-9 w-9" onClick={() => send({ type: "next" })} title="Next" disabled={!track}><SpNext className="h-5 w-5" /></IconBtn>
+              <IconBtn className="h-8 w-8" onClick={() => send({ type: "repeat" })} active={snap?.repeat !== "off"} title={snap?.repeat === "one" ? "Repeat one" : "Repeat"} disabled={!track}>{snap?.repeat === "one" ? <SpRepeatOne className="h-4 w-4" /> : <SpRepeat className="h-4 w-4" />}</IconBtn>
             </div>
+
           </div>
 
-          {/* The seek strip along the bottom: press or drag anywhere on it. The
-              keyboard seeks with Left/Right, as in the square layout. */}
+          {/* Minimize and close appear when the user hovers. */}
           <div
-            aria-hidden
-            style={noDragRegion}
-            onPointerDown={onStripPointerDown}
-            title={duration > 0 ? `${fmtTime(shownSeek)} / ${fmtTime(duration)}` : undefined}
-            className="group/seek absolute inset-x-0 bottom-0 z-20 h-[3px] cursor-pointer bg-white/15 transition-[height] duration-150 hover:h-[6px]"
-          >
-            <div className="relative h-full bg-white" style={{ width: `${Math.min(100, Math.max(0, (shownSeek / max) * 100))}%` }}>
-              <span className="absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 translate-x-1/2 rounded-full bg-white opacity-0 shadow transition-opacity group-hover/seek:opacity-100" />
-            </div>
-          </div>
-
-          {/* Back to the full miniplayer, minimize and close, top right: faint
-              until the cursor is over the window. */}
-          <div
-            className={`absolute right-1.5 top-1.5 z-30 flex items-center gap-1 transition-opacity duration-150 ${expanded ? "opacity-100" : "opacity-40"}`}
+            className={`absolute right-3 top-2.5 z-30 flex items-center gap-1 ${reveal()}`}
             style={noDragRegion}
           >
-            <button
-              type="button"
-              onClick={() => window.bytune?.pipSetCompact(false)}
-              title="Full miniplayer"
-              aria-label="Full miniplayer"
-              className="grid h-4 w-4 cursor-pointer place-items-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white active:scale-95"
-            >
-              <UnfoldVertical className="h-3 w-3" strokeWidth={2.25} aria-hidden />
-            </button>
             <button
               type="button"
               onClick={() => window.bytune?.pipMinimize()}

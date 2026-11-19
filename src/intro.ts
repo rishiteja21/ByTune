@@ -51,7 +51,7 @@ export function endIntro(): void {
         once: true,
       }),
     ),
-    wait(6000).then(() => false),
+    wait(3000).then(() => false),
   ]);
   void play(intro, ready);
 }

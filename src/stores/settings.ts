@@ -89,6 +89,11 @@ interface SettingsState {
   /* Miscellaneous */
   dontRepeatSuggestions: boolean;
   hideVolumeBar: boolean;
+  /** Which library shortcuts show in the left sidebar (Replay, Spotify, Downloads, Local Music). */
+  showReplay: boolean;
+  showSpotify: boolean;
+  showDownloads: boolean;
+  showLocalMusic: boolean;
   /** Windows: closing the window hides ByTune in the tray, music paused (electron/close-to-tray.ts). This device's own. */
   closeToTray: boolean;
 
@@ -124,6 +129,10 @@ interface SettingsState {
   setFilterNonMusicAudio(v: boolean): void;
   setDontRepeatSuggestions(v: boolean): void;
   setHideVolumeBar(v: boolean): void;
+  setShowReplay(v: boolean): void;
+  setShowSpotify(v: boolean): void;
+  setShowDownloads(v: boolean): void;
+  setShowLocalMusic(v: boolean): void;
   setCloseToTray(v: boolean): void;
 }
 
@@ -166,7 +175,12 @@ export const useSettings = create<SettingsState>()(
 
       dontRepeatSuggestions: false,
       hideVolumeBar: false,
-      // On by default: the main process reads it from this store's file when the window closes.
+      // Sidebar shortcuts all on by default.
+      showReplay: true,
+      showSpotify: true,
+      showDownloads: true,
+      showLocalMusic: true,
+      // On, as in ZCode: the main process reads it from this store's file when the window closes.
       closeToTray: true,
 
       setDownloadDir: (downloadDir) => set({ downloadDir }),
@@ -207,6 +221,10 @@ export const useSettings = create<SettingsState>()(
       setFilterNonMusicAudio: (filterNonMusicAudio) => set({ filterNonMusicAudio }),
       setDontRepeatSuggestions: (dontRepeatSuggestions) => set({ dontRepeatSuggestions }),
       setHideVolumeBar: (hideVolumeBar) => set({ hideVolumeBar }),
+      setShowReplay: (showReplay: boolean) => set({ showReplay }),
+      setShowSpotify: (showSpotify: boolean) => set({ showSpotify }),
+      setShowDownloads: (showDownloads: boolean) => set({ showDownloads }),
+      setShowLocalMusic: (showLocalMusic: boolean) => set({ showLocalMusic }),
       setCloseToTray: (closeToTray) => set({ closeToTray }),
     }),
     {

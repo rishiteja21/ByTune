@@ -26,7 +26,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { ChevronDown, Heart, Music2 } from "lucide-react";
+import { Heart, Minimize2, Music2 } from "lucide-react";
 import { PlayerBar } from "./PlayerBar";
 import { QueuePanel } from "./RightRail";
 import { LyricsView } from "./SyncedLyrics";
@@ -165,7 +165,7 @@ function FsVisualizer({ playing }: { playing: boolean }) {
   return (
     <div
       aria-hidden
-      className={`fs-viz flex h-9 w-[min(300px,72%)] items-center justify-center gap-[5px] ${
+      className={`fs-viz self-center flex h-10 w-[min(320px,76%)] items-center justify-center gap-[5px] ${
         playing ? "is-playing" : ""
       }`}
     >
@@ -269,11 +269,25 @@ function FsLyrics({
   );
 }
 
+/** Artwork left rail for the normal three-pane application shell. */
+export function NowPlayingArtwork() {
+  const track = usePlayer(shownTrack);
+  const playing = usePlayer((s) => s.playing);
+  const close = useUI((s) => s.toggleNowPlaying);
+  const palette = useArtworkPalette(track?.thumb ?? null);
+  return <aside className="w-[328px] shrink-0 flex flex-col min-h-0"><section className="relative flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 p-4 flex flex-col items-center justify-center" style={{ background: `linear-gradient(165deg, rgb(${palette.background}), #121214 72%)` }}>
+    <button onClick={close} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white" title="Return to Home" aria-label="Return to Home">×</button>
+    <div className="relative w-full aspect-square max-w-[280px] overflow-hidden rounded-xl bg-white/[0.06] shadow-art art-hairline">{track?.thumb ? <img src={upgradeArtwork(track.thumb, 800)} alt={`Artwork for ${track.title}`} className="h-full w-full object-cover animate-art-in" /> : <div className="grid h-full place-items-center"><Music2 className="h-12 w-12 text-white/35" /></div>}</div>
+    <div className="mt-6 w-full text-center"><div className="font-display text-[25px] font-extrabold tracking-[-0.03em] text-white"><FitText mode="auto" text={track ? shortTitle(track.title) : "Nothing playing"} full={track?.title} /></div><div className="mt-1 text-[14px] text-white/60"><FitText mode="auto" text={track?.artist ?? "Choose a song to begin"} /></div></div>
+    <div className={`mt-10 flex w-full justify-center ${playing ? "opacity-70" : "opacity-30"}`}><FsVisualizer playing={playing} /></div>
+  </section></aside>;
+}
+
 /* ================================================================ the view */
 
 export function NowPlaying() {
-  const open = useUI((s) => s.nowPlayingOpen);
-  const close = useUI((s) => s.toggleNowPlaying);
+  const open = useUI((s) => s.cinematicOpen);
+  const close = useUI((s) => s.toggleCinematic);
 
   /**
    * Fullscreen transition state machine — enter/exit choreography without
@@ -288,6 +302,8 @@ export function NowPlaying() {
    */
   const [mounted, setMounted] = useState(open);
   const [exiting, setExiting] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(true);
+  const [osFs, setOsFs] = useState(false);
   const mountedRef = useRef(open);
   const exitTimer = useRef<number | null>(null);
   /** True when THIS view put the window into fullscreen — an F11 fullscreen
@@ -306,14 +322,16 @@ export function NowPlaying() {
       setMounted(true);
       setExiting(false);
       enteredFsRef.current = !useUI.getState().osFullscreen;
-      void window.bytune?.setFullScreen(true);
+      // Only enter OS fullscreen when the user explicitly asks (fullscreen
+      // button). Opening the panel now stays a normal screen.
       return undefined;
     }
     if (!mountedRef.current) return undefined;
     // OS leaves fullscreen in parallel with the fade — but only when this
     // view entered it; an F11 fullscreen predating the view stays.
-    if (enteredFsRef.current) {
+    if (enteredFsRef.current && osFs) {
       enteredFsRef.current = false;
+      setOsFs(false);
       void window.bytune?.setFullScreen(false);
     }
     if (
@@ -338,7 +356,14 @@ export function NowPlaying() {
         exitTimer.current = null;
       }
     };
-  }, [open]);
+  }, [open, osFs]);
+
+  const toggleFullscreen = (): void => {
+    const next = !osFs;
+    setOsFs(next);
+    void window.bytune?.setFullScreen(next);
+    if (next) enteredFsRef.current = true;
+  };
 
   const track = usePlayer((s) => s.queue[s.index] ?? null);
   // What the screen shows: switches to the incoming song half way through a
@@ -444,7 +469,7 @@ export function NowPlaying() {
     <div
       className={`fixed inset-0 z-[100] overflow-hidden bg-black animate-fade-in ${
         exiting ? "fs-exiting" : ""
-      } ${idle ? "fs-idle" : ""} ${moving ? "fs-moving" : ""}`}
+      } ${idle ? "fs-idle" : ""} ${moving ? "fs-moving" : ""} ${osFs ? "fs-fullscreen" : ""}`}
     >
       <FsBackdrop artwork={shown?.thumb ?? null} boost={boost} legacy={legacyMesh} />
 
@@ -466,17 +491,11 @@ export function NowPlaying() {
           </div>
         </div>
 
-        {/* Header — close (mobile: the iOS sheet-grabber). Idle, it fades
-            and gives up its height. */}
-        <div className="fs-chrome fs-head relative h-14 shrink-0 flex items-center px-3">
-          <button
-            onClick={close}
-            title="Close (Esc)"
-            aria-label="Close Now Playing"
-            className="relative z-10 p-2 -ml-1 rounded-full text-white/75 hover:text-white hover:bg-white/[0.08] transition-colors"
-          >
-            <ChevronDown className="w-5 h-5" />
-          </button>
+        {/* The inactive chevrons were removed from the cinematic player. */}
+        <div className={`fs-chrome fs-head relative h-14 shrink-0 flex items-center px-3 ${osFs ? "justify-between" : ""}`}>
+          {osFs && (
+            <button onClick={toggleFullscreen} title="Exit full screen" aria-label="Exit full screen" className="relative z-10 p-2 -mr-1 rounded-full text-white/75 hover:text-white hover:bg-white/[0.08] transition-colors"><Minimize2 className="w-5 h-5" /></button>
+          )}
         </div>
 
         {!track || !shown ? (
@@ -493,9 +512,9 @@ export function NowPlaying() {
           /* Body — artwork column and lyrics column share the space between
              the header and the play bar. Percent-based widths + min() sizing,
              so the composition holds from 16:9 laptops to ultrawides. */
-          <div className="flex-1 min-h-0 min-w-0 flex flex-col lg:flex-row items-stretch justify-center gap-8 lg:gap-12 xl:gap-20 px-8 lg:px-14 pb-4">
+          <div className={`flex-1 min-h-0 min-w-0 flex flex-col lg:flex-row items-stretch justify-center gap-8 lg:gap-12 xl:gap-20 px-8 lg:px-14 pb-4 ${!queueOpen ? "lg:!flex-row-reverse" : ""}`}>
             {/* LEFT — the artwork is the hero; info and visualizer stay compact. */}
-            <div className="flex-1 lg:flex-none lg:w-[44%] xl:w-[42%] max-w-[640px] min-w-0 min-h-0 flex flex-col items-center justify-center">
+            <div className={`flex-1 lg:flex-none ${queueOpen ? "lg:w-[44%] xl:w-[42%]" : "lg:w-full"} max-w-[640px] min-w-0 min-h-0 flex flex-col items-center justify-center`}>
               <div className="relative w-full flex justify-center fs-enter">
                 {/* Ambient glow — the sleeve's own accent, spilling behind it. */}
                 <div
@@ -587,22 +606,24 @@ export function NowPlaying() {
                 Idle, the switch fades and its row closes up, so the lyrics
                 run from top to bottom. (The fade sits on an outer box: the
                 entrance's `both` fill would hold the switch's own opacity.) */}
-            <div className="flex-1 min-w-0 min-h-0 max-w-[780px] flex flex-col py-1">
-              <div className="fs-chrome fs-switch shrink-0 h-10 mb-5">
-                <div className="flex justify-center lg:justify-start fs-enter fs-d1">
-                  <FsModeSwitch mode={mode} onChange={setMode} />
+            {queueOpen && (
+              <div className="flex-1 min-w-0 min-h-0 max-w-[780px] flex flex-col py-1">
+                <div className="fs-chrome fs-switch shrink-0 h-10 mb-5">
+                  <div className="flex justify-center lg:justify-start fs-enter fs-d1">
+                    <FsModeSwitch mode={mode} onChange={setMode} />
+                  </div>
+                </div>
+                <div className="flex-1 min-h-0 flex flex-col">
+                  {mode === "lyrics" ? (
+                    <FsLyrics artRef={artRef} trackId={track.id} lyrics={lyrics} loading={lyricsLoading} offset={lyricsOffset} />
+                  ) : (
+                    /* The exact queue sheet from the right rail — same data,
+                       tabs and actions; its close returns to the lyrics view. */
+                    <QueuePanel onClose={() => setMode("lyrics")} />
+                  )}
                 </div>
               </div>
-              <div className="flex-1 min-h-0 flex flex-col">
-                {mode === "lyrics" ? (
-                  <FsLyrics artRef={artRef} trackId={track.id} lyrics={lyrics} loading={lyricsLoading} offset={lyricsOffset} />
-                ) : (
-                  /* The exact queue sheet from the right rail — same data,
-                     tabs and actions; its close returns to the lyrics view. */
-                  <QueuePanel onClose={() => setMode("lyrics")} />
-                )}
-              </div>
-            </div>
+            )}
           </div>
         )}
 

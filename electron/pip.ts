@@ -77,8 +77,8 @@ const PIP_MIN_H = 233;
 const PIP_MAX_W = 578;
 const PIP_MAX_H = 574;
 /** The compact bar: a fixed size, only ever reached with its button. */
-const PIP_BAR_W = 320;
-const PIP_BAR_H = 110;
+const PIP_BAR_W = 360;
+const PIP_BAR_H = 196;
 /** default resting spot: bottom-right of the work area */
 const REST_MARGIN = 16;
 
@@ -267,7 +267,7 @@ export function openPip(): void {
     return;
   }
   const saved = readSaved();
-  compact = saved?.compact ?? false;
+  compact = true;
   const square = saved?.rect ?? defaultRect();
   const rect = visibleRect(compact ? barBox(square) : square);
   lastRect = compact ? squareAt(rect, square) : rect;
@@ -307,6 +307,7 @@ export function openPip(): void {
   // "floating" = standard always-on-top: above normal windows, below system
   // dialogs and other topmost windows (Spotify's level).
   pipWindow.setAlwaysOnTop(true, "floating");
+  pipWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   restrictNavigation(pipWindow, true);
   loadInto(pipWindow);
 

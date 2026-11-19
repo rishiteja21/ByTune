@@ -1474,6 +1474,30 @@ html.reduce-blur .top-fade {
   -webkit-backdrop-filter: none;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.92), transparent);
 }
+html.reduce-blur .cover-glow-art {
+  filter: blur(24px) saturate(1.2) brightness(var(--cover-glow-brightness, 1)) !important;
+}
+html.reduce-blur .blur-\[100px\],
+html.reduce-blur .blur-\[90px\] {
+  filter: blur(24px) !important;
+}
+
+/* ---------- window hidden (background) ----------
+   When ByTune sits idle behind another window or hidden in the Dock / tray,
+   music keeps playing but nothing needs to animate or blur. Pause the
+   continuous decorative loops and lighten the heaviest blur filters so the
+   renderer stops drawing frames no one sees. The user's own
+   reduce-animation / reduce-blur settings still win when the window shows
+   again — this class only applies while hidden. */
+html.in-background .fs-art-wrap.fs-art-breathe,
+html.in-background .fs-viz.is-playing .fs-viz-bar,
+html.in-background [class*="animate-drift"],
+html.in-background [class*="cover-wall-drift"] {
+  animation-play-state: paused !important;
+}
+html.in-background .cover-glow-art {
+  filter: blur(24px) saturate(1.2) brightness(var(--cover-glow-brightness, 1)) !important;
+}
 
 /* ---------- liquid glass off ----------
    Same chrome, no refraction: solid fills keep hierarchy without blur. */
@@ -3586,16 +3610,17 @@ html.reduce-motion .ob-way-go {
   mask-image: linear-gradient(to right, transparent, black 18%, black 82%, transparent);
 }
 .fs-viz-bar {
-  width: 3px;
+  width: 4px;
   height: 100%;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.38);
   transform: scaleY(var(--rest, 0.14));
   transform-origin: center;
   transition: transform 900ms var(--ease-enter), background-color 900ms ease;
 }
 .fs-viz.is-playing .fs-viz-bar {
-  background: rgb(255 255 255 / 0.32);
+  background: rgb(255 255 255 / 0.68);
+  box-shadow: 0 0 8px rgb(255 255 255 / 0.18);
   animation: fs-viz-dance var(--dur, 2.6s) ease-in-out var(--delay, 0s) infinite;
 }
 
@@ -3655,6 +3680,43 @@ html.reduce-motion .ob-way-go {
 .fs-moving .lyrics-lines {
   will-change: transform;
 }
+
+/* ---------- fullscreen queue chevrons ----------
+   Only visible in OS fullscreen: ▲/▼ at the top open and close the queue
+   rail so the artwork can take the whole screen. */
+.fs-chevrons {
+  display: flex;
+  gap: 10px;
+}
+.fs-chev {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.10);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.fs-chev.up {
+  transform: rotate(180deg);
+}
+.fs-chev:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* OS fullscreen: the overlay goes full bleed with no header gaps. */
+.fs-fullscreen {
+  /* overflow-hidden already on root; nothing else needed — the container
+     already fills the viewport. */
+}
+
+/* ---------- trackpad swipe arrow ----------
+
 
 /* ---------- trackpad swipe arrow ----------
    Chrome's history arrow (SwipeArrow, lib/swipeNav): out of the panel's edge

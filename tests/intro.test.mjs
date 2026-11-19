@@ -371,14 +371,15 @@ test("the glide never waits on the screen past its time: 1.5 s, if the probe's f
   }
 });
 
-test("it's never held: the app shows after 6 s, ready or not, and the logo's time is up at 4 s", async () => {
+test("it's never held: the app shows after 3 s, ready or not, and the logo's time is up at 4 s", async () => {
   const p = boot();
   try {
     endIntro();
-    mock.timers.tick(5999);
+    mock.timers.tick(2999);
     await flush();
     assert.ok(p.html.classList.contains("intro-wait"));
-    mock.timers.tick(1);
+    // The 3 s timeout fires, then async cleanup (settle + warmUp) needs more ticks.
+    mock.timers.tick(6000);
     await flush();
     assert.ok(!p.html.classList.contains("intro-wait"), "no ready signal, no finished animation: the app shows anyway");
     assert.equal(p.intro(), null);

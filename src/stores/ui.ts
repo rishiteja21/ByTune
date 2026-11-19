@@ -125,7 +125,10 @@ export interface UIState {
   rightPanel: "details" | "queue" | "room";
   /** Synced lyrics rendered in the centre pane over the current view. */
   lyricsCenter: boolean;
+  /** Replaces the library rail with the playing artwork. */
   nowPlayingOpen: boolean;
+  /** Fullscreen cinematic player. */
+  cinematicOpen: boolean;
   /** Plain OS fullscreen (F11): the window covers the screen and the taskbar
       is gone; the app's own top bar stays visible. Mirrored from the main
       process — the renderer never writes it. */
@@ -163,6 +166,7 @@ export interface UIState {
   toggleRoom(): void;
   toggleLyrics(): void;
   toggleNowPlaying(): void;
+  toggleCinematic(): void;
   setOsFullscreen(fs: boolean): void;
   closePanels(): void;
   toast(message: string, kind?: Toast["kind"], duration?: number): void;
@@ -230,6 +234,7 @@ export const useUI = create<UIState>((set, get) => ({
   rightPanel: "details" as "details" | "queue" | "room",
   lyricsCenter: false,
   nowPlayingOpen: false,
+  cinematicOpen: false,
   osFullscreen: false,
   toasts: [],
   contextMenu: null,
@@ -337,7 +342,15 @@ export const useUI = create<UIState>((set, get) => ({
   },
 
   toggleNowPlaying() {
-    set({ nowPlayingOpen: !get().nowPlayingOpen });
+    if (!get().nowPlayingOpen) {
+      set({ nowPlayingOpen: true, lyricsCenter: true, rightPanel: "queue" });
+      return;
+    }
+    set({ nowPlayingOpen: false, lyricsCenter: false, rightPanel: "details", view: { name: "home" }, pendingScroll: 0, tintThumb: null });
+  },
+
+  toggleCinematic() {
+    set({ cinematicOpen: !get().cinematicOpen });
   },
 
   setOsFullscreen(osFullscreen) {
@@ -345,7 +358,7 @@ export const useUI = create<UIState>((set, get) => ({
   },
 
   closePanels() {
-    set({ rightPanel: "details", lyricsCenter: false, nowPlayingOpen: false });
+    set({ rightPanel: "details", lyricsCenter: false, nowPlayingOpen: false, cinematicOpen: false });
   },
 
   toast(message, kind = "info", duration = 4600) {

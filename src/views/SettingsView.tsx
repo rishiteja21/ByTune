@@ -38,6 +38,7 @@ import {
   FolderPlus,
   Gauge,
   Globe,
+  HardDrive,
   Image,
   Infinity as InfinityIcon,
   Info,
@@ -1342,6 +1343,32 @@ function LibraryPane() {
           note="Also save them into your Music library (Music/ByTune), so other players can use the files. Otherwise downloads stay in the folder above"
           badge={s.exportDownloads ? "Music/ByTune" : undefined}
           toggle={{ checked: s.exportDownloads, onChange: s.setExportDownloads }}
+        />
+      </Group>
+      <Group title="Sidebar shortcuts">
+        <Row
+          icon={Timer}
+          title="Replay"
+          note="Your listening stats"
+          toggle={{ checked: s.showReplay, onChange: s.setShowReplay }}
+        />
+        <Row
+          icon={SpotifyIcon}
+          title="Spotify"
+          note="Connect your playlists"
+          toggle={{ checked: s.showSpotify, onChange: s.setShowSpotify }}
+        />
+        <Row
+          icon={Download}
+          title="Downloads"
+          note="Playlist · Offline saves"
+          toggle={{ checked: s.showDownloads, onChange: s.setShowDownloads }}
+        />
+        <Row
+          icon={HardDrive}
+          title="Local Music"
+          note="On this device"
+          toggle={{ checked: s.showLocalMusic, onChange: s.setShowLocalMusic }}
         />
       </Group>
     </>

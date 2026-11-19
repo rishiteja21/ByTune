@@ -52,6 +52,7 @@ import { analyseTrack, peekAnalysis, type TrackAnalysis } from "./analysis";
 import { upgradeArtwork } from "./artwork";
 import { shortTitle } from "./format";
 import { createMediaKeyTap } from "./media-key-tap";
+import { isWindows } from "./platform";
 import { useSleepTimer } from "./sleepTimer";
 import { inRoom, stopHere, useRoom } from "../stores/room";
 import {
@@ -1221,6 +1222,13 @@ export function initAudioEngine(): void {
     const cur = state.queue[state.index] ?? null;
     const prevCur = prev.queue[prev.index] ?? null;
 
+    // macOS uses this state to decide which app owns headset media controls.
+    // Metadata and handlers alone leave a session inactive, so an AirPods
+    // press can be routed to another player (or to no app at all).
+    if (state.playing !== prev.playing || cur?.id !== prevCur?.id) {
+      syncMediaSessionPlaybackState(Boolean(cur), state.playing);
+    }
+
     // Moving between two copies of one song is a new track too (same queue, new index).
     if (cur?.id !== prevCur?.id || (state.queue === prev.queue && state.index !== prev.index)) {
       if (advancingToId && cur && advancingToId === cur.id) {
@@ -1620,6 +1628,7 @@ function updateMediaSession(track: Track | null): void {
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   if (!track) {
     navigator.mediaSession.metadata = null;
+    syncMediaSessionPlaybackState(false, false);
     return;
   }
   try {
@@ -1635,6 +1644,20 @@ function updateMediaSession(track: Track | null): void {
     });
   } catch {
     /* ignore */
+  }
+  syncMediaSessionPlaybackState(true, usePlayer.getState().playing);
+}
+
+/** Keep the operating-system session active while a ByTune track is loaded.
+ * AirPods and the macOS Now Playing controls dispatch through the active media
+ * session; without playbackState, Electron's renderer may expose metadata but
+ * never receive the hardware play/pause and skip actions. */
+function syncMediaSessionPlaybackState(hasTrack: boolean, playing: boolean): void {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.playbackState = hasTrack ? (playing ? "playing" : "paused") : "none";
+  } catch {
+    /* unsupported Chromium host */
   }
 }
 
@@ -1688,8 +1711,17 @@ function setupMediaSession(): void {
       multi: () => usePlayer.getState().next(true),
     },
   );
-  set("play", () => tap.press("play"));
-  set("pause", () => tap.press("pause"));
+  // Windows reports many headset double-clicks as two play/pause events, so
+  // it needs the gesture recognizer. macOS already emits distinct AirPods
+  // play/pause/next/previous actions: dispatch immediately so one press pauses
+  // without the 500 ms double-tap delay.
+  const dispatchPlayPause = (kind: "play" | "pause"): void => {
+    if (isWindows) tap.press(kind);
+    else usePlayer.getState().setPlaying(kind === "play");
+  };
+  set("play", () => dispatchPlayPause("play"));
+  set("pause", () => dispatchPlayPause("pause"));
+  set("stop", () => dispatchPlayPause("pause"));
   // A pending single press belongs to the pre-skip context; applying it after
   // the user already moved (or seeked) elsewhere would stop what they chose.
   set("previoustrack", () => {
@@ -1719,6 +1751,8 @@ function setupMediaSession(): void {
   window.bytune?.onMediaAction((a) =>
     actions.get(a.action)?.({ action: a.action, seekTime: a.seekTime } as MediaSessionActionDetails)
   );
+  const initial = usePlayer.getState();
+  syncMediaSessionPlaybackState(Boolean(initial.queue[initial.index]), initial.playing);
   window.setInterval(syncPositionState, 1000);
 }
 
